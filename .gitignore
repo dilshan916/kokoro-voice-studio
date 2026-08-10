@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Output Audio
+output/*.mp3
+output/*.wav
+output/*.ogg
+output/*.srt
+
+# Virtualenv & Build
+dist/
+build/
+*.spec
+.venv/
+venv/
