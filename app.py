@@ -1,13 +1,14 @@
 """
-Kokoro Voice Studio — Neon Pro DAW Studio Edition
-=================================================
-Ultra-Futuristic Cyberpunk / Neon Studio Aesthetic with 54 Multilingual Voices.
-Features: Radiant Neon Colorway, Multi-Color Gradient Waveform Visualizer,
-Custom Neural Voice Blender, Master EQ Acoustics, and CapCut/Premiere Packaging.
+Kokoro Voice Studio — Ultra-Sharp Modern Desktop Workstation (2026 Edition)
+===========================================================================
+Crystal-Clear High-DPI Retina UI with 54 Multilingual Studio Voices.
+Features: Hardware-Accelerated Per-Monitor DPI Awareness, Crisp Modern Typography,
+Clean Studio Glassmorphism, Custom Neural Voice Blender, and CapCut/Premiere Export.
 """
 
 from __future__ import annotations
 
+import ctypes
 import json
 import math
 import os
@@ -19,6 +20,19 @@ import time
 from datetime import datetime
 from pathlib import Path
 from tkinter import Canvas, filedialog, messagebox
+
+# ==============================================================================
+# ENABLE WINDOWS HARDWARE HIGH-DPI SCALING (ELIMINATES BLURRINESS & FUZZY FONTS)
+# ==============================================================================
+if sys.platform == "win32":
+    try:
+        # Per-Monitor V2 DPI awareness (Windows 10/11 native crisp rendering)
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
 import customtkinter as ctk
 from PIL import Image
@@ -33,39 +47,41 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 # ==============================================================================
-# RADIANT NEON STUDIO COLOR PALETTE
+# 2026 MODERN PRO CREATIVE STUDIO PALETTE (Linear / Figma / ElevenLabs Dark)
 # ==============================================================================
-BG_OBSIDIAN = "#06080e"       # Pure Deep Dark Stage
-BG_PANEL = "#0c101b"          # Frosted Dark Panel
-BG_CARD = "#121829"           # Inner Card Shell
-BG_CARD_HOVER = "#1c253d"     # Hover Card Shell
+BG_OBSIDIAN = "#0b0e14"       # Deep, pure matte charcoal canvas
+BG_PANEL = "#111520"          # Refined elevated panel
+BG_CARD = "#171c2b"           # Sleek card container
+BG_CARD_HOVER = "#222a3f"     # Subtle card hover state
+BG_INPUT = "#0e121c"          # Clean text editor background
 
-# Neon Glow Accents
-NEON_CYAN = "#00f0ff"         # Electric Cyber Cyan
-NEON_MAGENTA = "#f43f5e"      # Hot Neon Pink/Red
-NEON_PURPLE = "#a855f7"       # Vivid Ultraviolet
-NEON_EMERALD = "#00ff88"      # Electric Emerald
-NEON_AMBER = "#ffb703"        # Radioactive Amber
-NEON_BLUE = "#3b82f6"         # Laser Blue
+# Crisp Modern Accent Tokens
+ACCENT_PRIMARY = "#2563eb"    # Electric Studio Blue
+ACCENT_CYAN = "#38bdf8"       # Crisp Sky / Cyan Highlight
+ACCENT_PURPLE = "#818cf8"     # Indigo / Violet
+ACCENT_EMERALD = "#10b981"    # Clean Studio Emerald
+ACCENT_AMBER = "#f59e0b"      # Warm Accent
 
-# Text & Borders
-BORDER_NEON = "#1e293b"
-BORDER_GLOW = "#00f0ff"
-TEXT_GLOW = "#f8fafc"
-TEXT_MUTED = "#7e8d9f"
-TEXT_CYAN = "#38bdf8"
+# Crisp Neutral Text & Subtle 1px Borders
+BORDER_SUBTLE = "#232b40"
+BORDER_FOCUS = "#38bdf8"
+TEXT_PRIMARY = "#ffffff"
+TEXT_SECONDARY = "#94a3b8"
+TEXT_MUTED = "#64748b"
+
+FONT_FAMILY = "Segoe UI"
 
 
 class KokoroStudioApp(ctk.CTk):
-    """Futuristic Neon Pro Audio Workstation for Kokoro Voice Studio."""
+    """Modern 2026 Pro Audio Workstation for Kokoro Voice Studio."""
 
     def __init__(self):
         super().__init__()
 
         # Window Settings
-        self.title("⚡ KOKORO VOICE STUDIO PRO — Neon Audio Workstation (54 Voices)")
-        self.geometry("1340x900")
-        self.minsize(1150, 780)
+        self.title("Kokoro Voice Studio Pro — Modern AI Audio Workstation (54 Voices)")
+        self.geometry("1360x910")
+        self.minsize(1180, 780)
         self.configure(fg_color=BG_OBSIDIAN)
 
         # Core Components
@@ -90,7 +106,7 @@ class KokoroStudioApp(ctk.CTk):
         # Voice Blender State
         self.use_blended_voice = False
 
-        # Build Neon UI Architecture
+        # Build Clean Modern UI Architecture
         self._build_top_navbar()
         self._build_main_workspace()
         self._build_bottom_transport_dock()
@@ -107,68 +123,69 @@ class KokoroStudioApp(ctk.CTk):
 
     def _warmup_engine(self):
         try:
-            self.set_status("⚡ Powering up Kokoro-82M ONNX neural weights...", 0.3)
+            self.set_status("Loading Kokoro-82M ONNX weights...", 0.3)
             self.engine.load_model()
-            self.set_status(f"⚡ Ready — 54 Studio Voices Online across 8 Languages!", 1.0)
-            self.model_status_badge.configure(text="● NEON ENGINE: ONLINE (54 VOICES)", text_color=NEON_EMERALD)
+            self.set_status("Ready — 54 Studio Voices Active across 8 Languages", 1.0)
+            self.model_status_badge.configure(text="● Engine Active (54 Voices)", text_color=ACCENT_EMERALD)
         except Exception as e:
             self.set_status(f"Error loading model: {e}", 0.0)
-            self.model_status_badge.configure(text="● ENGINE: ERROR", text_color=NEON_MAGENTA)
+            self.model_status_badge.configure(text="● Engine Error", text_color="#ef4444")
 
     # ------------------------------------------------------------------
-    # Top Neon Navigation Bar
+    # Top Sleek Navigation Bar
     # ------------------------------------------------------------------
 
     def _build_top_navbar(self):
-        nav = ctk.CTkFrame(self, height=64, corner_radius=0, fg_color=BG_PANEL, border_width=1, border_color="#182032")
+        nav = ctk.CTkFrame(self, height=60, corner_radius=0, fg_color=BG_PANEL, border_width=1, border_color=BORDER_SUBTLE)
         nav.pack(fill="x", side="top", padx=0, pady=0)
 
         # Brand Container
         brand_frame = ctk.CTkFrame(nav, fg_color="transparent")
-        brand_frame.pack(side="left", padx=20, pady=10)
+        brand_frame.pack(side="left", padx=20, pady=8)
 
         logo_title = ctk.CTkLabel(
             brand_frame,
-            text="⚡ KOKORO STUDIO",
-            font=ctk.CTkFont(size=20, weight="bold"),
-            text_color=NEON_CYAN,
+            text="🎙️ Kokoro Voice Studio",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=17, weight="bold"),
+            text_color=TEXT_PRIMARY,
         )
         logo_title.pack(side="left", padx=(0, 8))
 
-        neon_badge = ctk.CTkLabel(
+        pro_badge = ctk.CTkLabel(
             brand_frame,
-            text="NEON PRO DAW",
-            font=ctk.CTkFont(size=9, weight="bold"),
-            fg_color="#1e1b4b",
-            text_color=NEON_PURPLE,
+            text="PRO v2.5",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
+            fg_color="#1e293b",
+            text_color=ACCENT_CYAN,
             corner_radius=6,
             padx=8,
             pady=2,
         )
-        neon_badge.pack(side="left", padx=2)
+        pro_badge.pack(side="left", padx=2)
 
         self.model_status_badge = ctk.CTkLabel(
             nav,
-            text="● NEON ENGINE: STARTING...",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color=NEON_AMBER,
+            text="● Engine Loading...",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            text_color=ACCENT_AMBER,
         )
-        self.model_status_badge.pack(side="left", padx=20)
+        self.model_status_badge.pack(side="left", padx=25)
 
         # Right Action Buttons
         right_actions = ctk.CTkFrame(nav, fg_color="transparent")
-        right_actions.pack(side="right", padx=15, pady=12)
+        right_actions.pack(side="right", padx=15, pady=10)
 
         btn_save_proj = ctk.CTkButton(
             right_actions,
             text="💾 Save Project",
             width=110,
             height=32,
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
             border_width=1,
-            border_color="#1f2c47",
+            border_color=BORDER_SUBTLE,
+            corner_radius=6,
             command=self._save_project_file,
         )
         btn_save_proj.pack(side="left", padx=4)
@@ -178,11 +195,12 @@ class KokoroStudioApp(ctk.CTk):
             text="📂 Open Project",
             width=110,
             height=32,
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
             border_width=1,
-            border_color="#1f2c47",
+            border_color=BORDER_SUBTLE,
+            corner_radius=6,
             command=self._load_project_file,
         )
         btn_open_proj.pack(side="left", padx=4)
@@ -192,9 +210,10 @@ class KokoroStudioApp(ctk.CTk):
             text="🎬 CapCut Package",
             width=135,
             height=32,
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
             fg_color="#4f46e5",
-            hover_color="#6366f1",
+            hover_color="#4338ca",
+            corner_radius=6,
             command=self._export_capcut_package,
         )
         btn_capcut.pack(side="left", padx=4)
@@ -204,9 +223,10 @@ class KokoroStudioApp(ctk.CTk):
             text="📁 Output Folder",
             width=115,
             height=32,
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color="#0284c7",
-            hover_color="#0ea5e9",
+            hover_color="#0369a1",
+            corner_radius=6,
             command=self._open_output_folder,
         )
         open_folder_btn.pack(side="left", padx=4)
@@ -217,38 +237,38 @@ class KokoroStudioApp(ctk.CTk):
 
     def _build_main_workspace(self):
         self.workspace = ctk.CTkFrame(self, fg_color="transparent")
-        self.workspace.pack(fill="both", expand=True, padx=12, pady=(6, 4))
+        self.workspace.pack(fill="both", expand=True, padx=12, pady=(8, 4))
 
         self._build_left_voice_panel()
         self._build_center_stage()
         self._build_right_inspector()
 
     # ------------------------------------------------------------------
-    # LEFT PANEL: Voice Browser & Custom Voice Blender
+    # LEFT PANEL: Clean Voice Browser & Custom Voice Blender
     # ------------------------------------------------------------------
 
     def _build_left_voice_panel(self):
-        left_box = ctk.CTkFrame(self.workspace, width=330, corner_radius=12, fg_color=BG_PANEL, border_width=1, border_color="#182032")
+        left_box = ctk.CTkFrame(self.workspace, width=330, corner_radius=10, fg_color=BG_PANEL, border_width=1, border_color=BORDER_SUBTLE)
         left_box.pack(side="left", fill="y", padx=(0, 6), pady=0)
         left_box.pack_propagate(False)
 
         hdr = ctk.CTkFrame(left_box, fg_color="transparent")
-        hdr.pack(fill="x", padx=12, pady=(10, 4))
-        ctk.CTkLabel(hdr, text="🧬 Voice Browser & Blender", font=ctk.CTkFont(size=14, weight="bold"), text_color=NEON_CYAN).pack(side="left")
+        hdr.pack(fill="x", padx=12, pady=(12, 4))
+        ctk.CTkLabel(hdr, text="Voice Catalog & Blender", font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"), text_color=TEXT_PRIMARY).pack(side="left")
 
-        # Neon Voice Blender Card
-        blend_card = ctk.CTkFrame(left_box, fg_color=BG_CARD, corner_radius=10, border_width=1, border_color="#24304d")
+        # Custom Voice Blender Card
+        blend_card = ctk.CTkFrame(left_box, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color=BORDER_SUBTLE)
         blend_card.pack(fill="x", padx=8, pady=4)
 
         b_header = ctk.CTkFrame(blend_card, fg_color="transparent")
-        b_header.pack(fill="x", padx=10, pady=(6, 2))
-        ctk.CTkLabel(b_header, text="✨ Custom Voice Blender", font=ctk.CTkFont(size=12, weight="bold"), text_color=NEON_PURPLE).pack(side="left")
+        b_header.pack(fill="x", padx=10, pady=(8, 2))
+        ctk.CTkLabel(b_header, text="✨ Voice Blender", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"), text_color=ACCENT_CYAN).pack(side="left")
 
         self.blend_switch = ctk.CTkSwitch(
             b_header,
-            text="Blend",
-            font=ctk.CTkFont(size=11),
-            progress_color=NEON_PURPLE,
+            text="Mix",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            progress_color=ACCENT_PRIMARY,
             command=self._on_blend_switch_toggled,
         )
         self.blend_switch.pack(side="right")
@@ -256,20 +276,20 @@ class KokoroStudioApp(ctk.CTk):
         voice_keys = list(VOICE_CATALOG.keys())
         voice_names = [f"{VOICE_CATALOG[k]['flag']} {VOICE_CATALOG[k]['name']}" for k in voice_keys]
 
-        ctk.CTkLabel(blend_card, text="Voice A (Primary):", font=ctk.CTkFont(size=10), text_color=TEXT_MUTED).pack(anchor="w", padx=10, pady=(2, 0))
+        ctk.CTkLabel(blend_card, text="Voice A (Primary):", font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=TEXT_MUTED).pack(anchor="w", padx=10, pady=(2, 0))
         self.blend_v1_var = ctk.StringVar(value=voice_names[0])
-        self.blend_v1_menu = ctk.CTkOptionMenu(blend_card, values=voice_names, variable=self.blend_v1_var, height=26, fg_color="#1c243a")
+        self.blend_v1_menu = ctk.CTkOptionMenu(blend_card, values=voice_names, variable=self.blend_v1_var, height=28, fg_color="#1e2538")
         self.blend_v1_menu.pack(fill="x", padx=10, pady=(1, 3))
 
-        ctk.CTkLabel(blend_card, text="Voice B (Secondary):", font=ctk.CTkFont(size=10), text_color=TEXT_MUTED).pack(anchor="w", padx=10, pady=(1, 0))
+        ctk.CTkLabel(blend_card, text="Voice B (Secondary):", font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=TEXT_MUTED).pack(anchor="w", padx=10, pady=(1, 0))
         self.blend_v2_var = ctk.StringVar(value=voice_names[1])
-        self.blend_v2_menu = ctk.CTkOptionMenu(blend_card, values=voice_names, variable=self.blend_v2_var, height=26, fg_color="#1c243a")
+        self.blend_v2_menu = ctk.CTkOptionMenu(blend_card, values=voice_names, variable=self.blend_v2_var, height=28, fg_color="#1e2538")
         self.blend_v2_menu.pack(fill="x", padx=10, pady=(1, 3))
 
         ratio_frame = ctk.CTkFrame(blend_card, fg_color="transparent")
         ratio_frame.pack(fill="x", padx=10, pady=(2, 4))
-        ctk.CTkLabel(ratio_frame, text="Blend Ratio:", font=ctk.CTkFont(size=10), text_color=TEXT_MUTED).pack(side="left")
-        self.blend_ratio_label = ctk.CTkLabel(ratio_frame, text="50% A / 50% B", font=ctk.CTkFont(size=10, weight="bold"), text_color=NEON_CYAN)
+        ctk.CTkLabel(ratio_frame, text="Mix Ratio:", font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=TEXT_MUTED).pack(side="left")
+        self.blend_ratio_label = ctk.CTkLabel(ratio_frame, text="50% A / 50% B", font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"), text_color=ACCENT_CYAN)
         self.blend_ratio_label.pack(side="right")
 
         self.blend_ratio_slider = ctk.CTkSlider(
@@ -277,7 +297,7 @@ class KokoroStudioApp(ctk.CTk):
             from_=0.0,
             to=1.0,
             number_of_steps=20,
-            progress_color=NEON_PURPLE,
+            progress_color=ACCENT_PRIMARY,
             command=self._on_blend_ratio_change,
         )
         self.blend_ratio_slider.set(0.5)
@@ -286,28 +306,29 @@ class KokoroStudioApp(ctk.CTk):
         btn_test_blend = ctk.CTkButton(
             blend_card,
             text="🔊 Test Blended Voice",
-            height=26,
-            font=ctk.CTkFont(size=10, weight="bold"),
+            height=28,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             fg_color="#312e81",
             hover_color="#4338ca",
+            corner_radius=6,
             command=self._test_blended_voice,
         )
         btn_test_blend.pack(fill="x", padx=10, pady=(0, 6))
 
         # Language Filter
         l_bar = ctk.CTkFrame(left_box, fg_color="transparent")
-        l_bar.pack(fill="x", padx=8, pady=(6, 2))
+        l_bar.pack(fill="x", padx=8, pady=(8, 2))
 
-        ctk.CTkLabel(l_bar, text="Filter Language:", font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
+        ctk.CTkLabel(l_bar, text="Filter Language:", font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
         self.left_lang_var = ctk.StringVar(value="All Languages")
         self.left_lang_menu = ctk.CTkOptionMenu(
             l_bar,
             values=self.engine.get_language_options(),
             variable=self.left_lang_var,
             width=160,
-            height=26,
-            font=ctk.CTkFont(size=10),
-            fg_color="#1c243a",
+            height=28,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            fg_color="#1e2538",
             command=self._on_left_filter_changed,
         )
         self.left_lang_menu.pack(side="right")
@@ -325,24 +346,25 @@ class KokoroStudioApp(ctk.CTk):
             if filter_lang != "All Languages" and info["lang_name"] != filter_lang:
                 continue
 
-            card = ctk.CTkFrame(self.scroll_voices, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color="#1c253d")
+            card = ctk.CTkFrame(self.scroll_voices, fg_color=BG_CARD, corner_radius=6, border_width=1, border_color=BORDER_SUBTLE)
             card.pack(fill="x", padx=2, pady=2)
 
             col = ctk.CTkFrame(card, fg_color="transparent")
             col.pack(side="left", padx=8, pady=4)
 
             flag = info.get("flag", "🌐")
-            ctk.CTkLabel(col, text=f"{flag} {info['name']} ({info['gender']})", font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_GLOW).pack(anchor="w")
-            ctk.CTkLabel(col, text=f"{info['lang_name']} • {info['description'][:24]}...", font=ctk.CTkFont(size=9), text_color=TEXT_MUTED).pack(anchor="w")
+            ctk.CTkLabel(col, text=f"{flag} {info['name']} ({info['gender']})", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"), text_color=TEXT_PRIMARY).pack(anchor="w")
+            ctk.CTkLabel(col, text=f"{info['lang_name']} • {info['description'][:24]}...", font=ctk.CTkFont(family=FONT_FAMILY, size=10), text_color=TEXT_SECONDARY).pack(anchor="w")
 
             btn_play = ctk.CTkButton(
                 card,
                 text="🔊",
-                width=28,
-                height=24,
-                font=ctk.CTkFont(size=10),
-                fg_color="#1c243a",
+                width=32,
+                height=26,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                fg_color="#1e2538",
                 hover_color=BG_CARD_HOVER,
+                corner_radius=4,
                 command=lambda v=key: self._play_single_voice_sample(v),
             )
             btn_play.pack(side="right", padx=6, pady=4)
@@ -353,7 +375,7 @@ class KokoroStudioApp(ctk.CTk):
     def _on_blend_switch_toggled(self):
         self.use_blended_voice = self.blend_switch.get() == 1
         if self.use_blended_voice:
-            self.set_status("⚡ Custom Voice Blender activated!", 1.0)
+            self.set_status("Custom Voice Blender active", 1.0)
             self.single_voice_menu.configure(state="disabled")
         else:
             self.single_voice_menu.configure(state="normal")
@@ -372,7 +394,7 @@ class KokoroStudioApp(ctk.CTk):
 
         def _worker():
             try:
-                self.set_status(f"⚡ Synthesizing hybrid neon blend ({VOICE_CATALOG[k1]['name']} + {VOICE_CATALOG[k2]['name']})...", 0.4)
+                self.set_status(f"Synthesizing blended sample ({VOICE_CATALOG[k1]['name']} + {VOICE_CATALOG[k2]['name']})...", 0.4)
                 blended = self.engine.blend_voices(k1, k2, ratio)
                 samples, sr = self.engine._kokoro.create(
                     f"Hello! I am a custom blended voice created from {VOICE_CATALOG[k1]['name']} and {VOICE_CATALOG[k2]['name']}.",
@@ -415,19 +437,19 @@ class KokoroStudioApp(ctk.CTk):
         threading.Thread(target=_worker, daemon=True).start()
 
     # ------------------------------------------------------------------
-    # CENTER STAGE: Script Studio & Multi-Speaker Tabs
+    # CENTER STAGE: Clean Script Studio & Multi-Speaker Tabs
     # ------------------------------------------------------------------
 
     def _build_center_stage(self):
-        center_box = ctk.CTkFrame(self.workspace, corner_radius=12, fg_color=BG_PANEL, border_width=1, border_color="#182032")
+        center_box = ctk.CTkFrame(self.workspace, corner_radius=10, fg_color=BG_PANEL, border_width=1, border_color=BORDER_SUBTLE)
         center_box.pack(side="left", fill="both", expand=True, padx=4, pady=0)
 
         self.tabview = ctk.CTkTabview(
             center_box,
-            corner_radius=10,
+            corner_radius=8,
             fg_color="transparent",
-            segmented_button_selected_color=NEON_BLUE,
-            segmented_button_selected_hover_color="#2563eb",
+            segmented_button_selected_color=ACCENT_PRIMARY,
+            segmented_button_selected_hover_color="#1d4ed8",
             segmented_button_unselected_color=BG_CARD,
             segmented_button_unselected_hover_color=BG_CARD_HOVER,
         )
@@ -447,22 +469,23 @@ class KokoroStudioApp(ctk.CTk):
         tab = self.tab_single
 
         # SSML & Quick Insert Toolbar
-        ssml_bar = ctk.CTkFrame(tab, fg_color="transparent", height=30)
-        ssml_bar.pack(fill="x", padx=6, pady=(2, 4))
+        ssml_bar = ctk.CTkFrame(tab, fg_color="transparent", height=32)
+        ssml_bar.pack(fill="x", padx=6, pady=(2, 6))
 
-        ctk.CTkLabel(ssml_bar, text="Insert Tags:", font=ctk.CTkFont(size=11, weight="bold"), text_color=NEON_CYAN).pack(side="left", padx=(4, 6))
+        ctk.CTkLabel(ssml_bar, text="Insert Pause:", font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"), text_color=TEXT_MUTED).pack(side="left", padx=(4, 6))
 
         for pause_sec in ["0.5s", "1.0s", "2.0s"]:
             btn_p = ctk.CTkButton(
                 ssml_bar,
-                text=f"⏱️ +{pause_sec}",
-                width=68,
-                height=24,
-                font=ctk.CTkFont(size=10, weight="bold"),
+                text=f"+{pause_sec}",
+                width=62,
+                height=26,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=11),
                 fg_color=BG_CARD,
                 hover_color=BG_CARD_HOVER,
                 border_width=1,
-                border_color="#24304d",
+                border_color=BORDER_SUBTLE,
+                corner_radius=4,
                 command=lambda p=pause_sec: self.single_text.insert("insert", f" [pause {p}] "),
             )
             btn_p.pack(side="left", padx=2)
@@ -470,23 +493,25 @@ class KokoroStudioApp(ctk.CTk):
         btn_paste = ctk.CTkButton(
             ssml_bar,
             text="📋 Paste",
-            width=65,
-            height=24,
-            font=ctk.CTkFont(size=10),
+            width=70,
+            height=26,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
+            corner_radius=4,
             command=self._paste_single_text,
         )
         btn_paste.pack(side="right", padx=2)
 
         btn_sample = ctk.CTkButton(
             ssml_bar,
-            text="💡 Sample",
-            width=65,
-            height=24,
-            font=ctk.CTkFont(size=10),
+            text="💡 Sample Story",
+            width=100,
+            height=26,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
+            corner_radius=4,
             command=self._load_sample_story,
         )
         btn_sample.pack(side="right", padx=2)
@@ -494,35 +519,37 @@ class KokoroStudioApp(ctk.CTk):
         btn_clear = ctk.CTkButton(
             ssml_bar,
             text="🗑️ Clear",
-            width=60,
-            height=24,
-            font=ctk.CTkFont(size=10),
+            width=65,
+            height=26,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color="#3a1c24",
             hover_color="#5c2636",
+            corner_radius=4,
             command=lambda: self.single_text.delete("1.0", "end"),
         )
         btn_clear.pack(side="right", padx=2)
 
+        # Script Editor Box
         self.single_text = ctk.CTkTextbox(
             tab,
-            font=ctk.CTkFont(family="Segoe UI", size=self.editor_font_size),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=self.editor_font_size),
             wrap="word",
-            corner_radius=10,
-            fg_color=BG_CARD,
+            corner_radius=8,
+            fg_color=BG_INPUT,
             border_width=1,
-            border_color="#1e293b",
+            border_color=BORDER_SUBTLE,
         )
         self.single_text.pack(fill="both", expand=True, padx=6, pady=(0, 4))
         self.single_text.insert(
             "1.0",
-            "Welcome to Kokoro Voice Studio Neon Edition. With 54 studio voices across 8 languages, you have complete creative control. [pause 0.5s] Experience zero cloud latency, custom hybrid voice blending, and studio-grade audio mastering presets.",
+            "Welcome to Kokoro Voice Studio Pro. With 54 studio voices across 8 languages, you have complete creative control. [pause 0.5s] Experience zero cloud latency, custom hybrid voice blending, and studio-grade audio mastering presets.",
         )
         self.single_text.bind("<KeyRelease>", self._update_single_stats)
 
         self.stats_label = ctk.CTkLabel(
             tab,
             text="📊 34 Words | 240 Characters | Est. 0:14 Duration",
-            font=ctk.CTkFont(size=11),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             text_color=TEXT_MUTED,
         )
         self.stats_label.pack(anchor="w", padx=10, pady=(0, 2))
@@ -530,19 +557,20 @@ class KokoroStudioApp(ctk.CTk):
     def _build_multi_drama_tab(self):
         tab = self.tab_multi
 
-        top_bar = ctk.CTkFrame(tab, fg_color="transparent", height=30)
-        top_bar.pack(fill="x", padx=6, pady=(2, 4))
+        top_bar = ctk.CTkFrame(tab, fg_color="transparent", height=32)
+        top_bar.pack(fill="x", padx=6, pady=(2, 6))
 
-        ctk.CTkLabel(top_bar, text="Format: [SpeakerName]: Line...", font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
+        ctk.CTkLabel(top_bar, text="Script Format: [SpeakerName]: Dialogue line...", font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
 
         btn_tmpl1 = ctk.CTkButton(
             top_bar,
             text="🎭 Drama Scene",
-            width=100,
-            height=24,
-            font=ctk.CTkFont(size=10),
+            width=105,
+            height=26,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
+            corner_radius=4,
             command=self._load_multi_template_drama,
         )
         btn_tmpl1.pack(side="right", padx=2)
@@ -550,11 +578,12 @@ class KokoroStudioApp(ctk.CTk):
         btn_tmpl2 = ctk.CTkButton(
             top_bar,
             text="🎙️ Podcast Show",
-            width=110,
-            height=24,
-            font=ctk.CTkFont(size=10),
+            width=115,
+            height=26,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
+            corner_radius=4,
             command=self._load_multi_template_podcast,
         )
         btn_tmpl2.pack(side="right", padx=2)
@@ -564,12 +593,12 @@ class KokoroStudioApp(ctk.CTk):
 
         self.multi_text = ctk.CTkTextbox(
             split_frame,
-            font=ctk.CTkFont(family="Segoe UI", size=13),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
             wrap="word",
-            corner_radius=10,
-            fg_color=BG_CARD,
+            corner_radius=8,
+            fg_color=BG_INPUT,
             border_width=1,
-            border_color="#1e293b",
+            border_color=BORDER_SUBTLE,
         )
         self.multi_text.pack(side="left", fill="both", expand=True, padx=(0, 6))
         self.multi_text.insert(
@@ -580,21 +609,22 @@ class KokoroStudioApp(ctk.CTk):
             "[Adam]: Let's generate and export our dialogue scene right away!",
         )
 
-        right_container = ctk.CTkFrame(split_frame, width=290, fg_color=BG_CARD, corner_radius=10, border_width=1, border_color="#1e293b")
+        right_container = ctk.CTkFrame(split_frame, width=290, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color=BORDER_SUBTLE)
         right_container.pack(side="right", fill="both", expand=False)
 
         rp_header = ctk.CTkFrame(right_container, fg_color="transparent")
         rp_header.pack(fill="x", padx=8, pady=6)
-        ctk.CTkLabel(rp_header, text="👥 Cast Members", font=ctk.CTkFont(size=12, weight="bold"), text_color=NEON_CYAN).pack(side="left")
+        ctk.CTkLabel(rp_header, text="👥 Cast Members", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"), text_color=TEXT_PRIMARY).pack(side="left")
 
         detect_btn = ctk.CTkButton(
             rp_header,
             text="🔍 Refresh",
             width=70,
-            height=22,
-            font=ctk.CTkFont(size=10, weight="bold"),
-            fg_color=NEON_BLUE,
-            hover_color="#2563eb",
+            height=24,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
+            fg_color=ACCENT_PRIMARY,
+            hover_color="#1d4ed8",
+            corner_radius=4,
             command=self._detect_speakers,
         )
         detect_btn.pack(side="right")
@@ -606,20 +636,21 @@ class KokoroStudioApp(ctk.CTk):
 
     def _build_batch_queue_tab(self):
         tab = self.tab_batch
-        card = ctk.CTkFrame(tab, fg_color=BG_CARD, corner_radius=10, border_width=1, border_color="#1e293b")
+        card = ctk.CTkFrame(tab, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color=BORDER_SUBTLE)
         card.pack(fill="both", expand=True, padx=6, pady=6)
 
         hdr = ctk.CTkFrame(card, fg_color="transparent")
         hdr.pack(fill="x", padx=12, pady=10)
-        ctk.CTkLabel(hdr, text="Batch File Processing Queue", font=ctk.CTkFont(size=14, weight="bold"), text_color=NEON_CYAN).pack(side="left")
+        ctk.CTkLabel(hdr, text="Batch File Queue", font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"), text_color=TEXT_PRIMARY).pack(side="left")
 
         btn_add = ctk.CTkButton(
             hdr,
             text="➕ Add .txt Files",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             height=28,
-            fg_color=NEON_BLUE,
-            hover_color="#2563eb",
+            fg_color=ACCENT_PRIMARY,
+            hover_color="#1d4ed8",
+            corner_radius=4,
             command=self._select_batch_files,
         )
         btn_add.pack(side="right", padx=4)
@@ -627,9 +658,9 @@ class KokoroStudioApp(ctk.CTk):
         self.batch_files_listbox = ctk.CTkTextbox(
             card,
             font=ctk.CTkFont(family="Consolas", size=12),
-            fg_color=BG_PANEL,
+            fg_color=BG_INPUT,
             border_width=1,
-            border_color="#1e293b",
+            border_color=BORDER_SUBTLE,
         )
         self.batch_files_listbox.pack(fill="both", expand=True, padx=12, pady=(0, 10))
 
@@ -637,21 +668,22 @@ class KokoroStudioApp(ctk.CTk):
         tab = self.tab_history
         hdr = ctk.CTkFrame(tab, fg_color="transparent")
         hdr.pack(fill="x", padx=8, pady=6)
-        ctk.CTkLabel(hdr, text="Exported Audio Library", font=ctk.CTkFont(size=13, weight="bold"), text_color=NEON_CYAN).pack(side="left")
+        ctk.CTkLabel(hdr, text="Recent Audio Library", font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"), text_color=TEXT_PRIMARY).pack(side="left")
 
         btn_refresh = ctk.CTkButton(
             hdr,
             text="🔄 Refresh",
             width=90,
-            height=24,
-            font=ctk.CTkFont(size=11),
+            height=26,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
+            corner_radius=4,
             command=self._refresh_recent_history,
         )
         btn_refresh.pack(side="right")
 
-        self.history_scroll = ctk.CTkScrollableFrame(tab, fg_color=BG_CARD, corner_radius=10, border_width=1, border_color="#1e293b")
+        self.history_scroll = ctk.CTkScrollableFrame(tab, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color=BORDER_SUBTLE)
         self.history_scroll.pack(fill="both", expand=True, padx=6, pady=(0, 6))
 
     # ------------------------------------------------------------------
@@ -659,34 +691,35 @@ class KokoroStudioApp(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _build_right_inspector(self):
-        right_box = ctk.CTkFrame(self.workspace, width=320, corner_radius=12, fg_color=BG_PANEL, border_width=1, border_color="#182032")
+        right_box = ctk.CTkFrame(self.workspace, width=320, corner_radius=10, fg_color=BG_PANEL, border_width=1, border_color=BORDER_SUBTLE)
         right_box.pack(side="right", fill="y", padx=(6, 0), pady=0)
         right_box.pack_propagate(False)
 
         hdr = ctk.CTkFrame(right_box, fg_color="transparent")
-        hdr.pack(fill="x", padx=12, pady=(10, 4))
-        ctk.CTkLabel(hdr, text="🎛️ Audio Master Inspector", font=ctk.CTkFont(size=14, weight="bold"), text_color=NEON_CYAN).pack(side="left")
+        hdr.pack(fill="x", padx=12, pady=(12, 4))
+        ctk.CTkLabel(hdr, text="Audio Master Inspector", font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"), text_color=TEXT_PRIMARY).pack(side="left")
 
         # 1. Voice Language & Voice Selector Card
-        v_card = ctk.CTkFrame(right_box, fg_color=BG_CARD, corner_radius=10, border_width=1, border_color="#1e293b")
+        v_card = ctk.CTkFrame(right_box, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color=BORDER_SUBTLE)
         v_card.pack(fill="x", padx=8, pady=4)
 
         l_line = ctk.CTkFrame(v_card, fg_color="transparent")
-        l_line.pack(fill="x", padx=8, pady=(6, 2))
-        ctk.CTkLabel(l_line, text="Language:", font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
+        l_line.pack(fill="x", padx=8, pady=(8, 2))
+        ctk.CTkLabel(l_line, text="Language:", font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
         self.right_lang_var = ctk.StringVar(value="All Languages")
         self.right_lang_menu = ctk.CTkOptionMenu(
             l_line,
             values=self.engine.get_language_options(),
             variable=self.right_lang_var,
             width=170,
-            height=26,
-            fg_color="#1c243a",
+            height=28,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            fg_color="#1e2538",
             command=self._on_right_lang_filter_changed,
         )
         self.right_lang_menu.pack(side="right")
 
-        ctk.CTkLabel(v_card, text="Studio Voice (54 Available):", font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", padx=8, pady=(4, 2))
+        ctk.CTkLabel(v_card, text="Studio Voice (54 Available):", font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", padx=8, pady=(6, 2))
 
         voice_options = [f"{info['flag']} {info['name']} ({info['gender']}, {info['lang_name']})" for key, info in VOICE_CATALOG.items()]
         self.single_voice_var = ctk.StringVar(value=voice_options[0])
@@ -694,21 +727,22 @@ class KokoroStudioApp(ctk.CTk):
             v_card,
             values=voice_options,
             variable=self.single_voice_var,
-            height=30,
-            fg_color="#1c243a",
-            button_color=NEON_BLUE,
-            button_hover_color="#2563eb",
+            height=32,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            fg_color="#1e2538",
+            button_color=ACCENT_PRIMARY,
+            button_hover_color="#1d4ed8",
         )
         self.single_voice_menu.pack(fill="x", padx=8, pady=(0, 8))
 
         # 2. Playback Speed & Cadence
-        s_card = ctk.CTkFrame(right_box, fg_color=BG_CARD, corner_radius=10, border_width=1, border_color="#1e293b")
+        s_card = ctk.CTkFrame(right_box, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color=BORDER_SUBTLE)
         s_card.pack(fill="x", padx=8, pady=4)
 
         s_head = ctk.CTkFrame(s_card, fg_color="transparent")
-        s_head.pack(fill="x", padx=8, pady=(6, 2))
-        ctk.CTkLabel(s_head, text="Playback Speed:", font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
-        self.single_speed_val_label = ctk.CTkLabel(s_head, text="1.00x", font=ctk.CTkFont(size=12, weight="bold"), text_color=NEON_CYAN)
+        s_head.pack(fill="x", padx=8, pady=(8, 2))
+        ctk.CTkLabel(s_head, text="Playback Speed:", font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
+        self.single_speed_val_label = ctk.CTkLabel(s_head, text="1.00x", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"), text_color=ACCENT_CYAN)
         self.single_speed_val_label.pack(side="right")
 
         self.single_speed_slider = ctk.CTkSlider(
@@ -716,81 +750,56 @@ class KokoroStudioApp(ctk.CTk):
             from_=0.5,
             to=2.0,
             number_of_steps=30,
-            progress_color=NEON_CYAN,
+            progress_color=ACCENT_PRIMARY,
             command=lambda v: self.single_speed_val_label.configure(text=f"{v:.2f}x"),
         )
         self.single_speed_slider.set(1.0)
         self.single_speed_slider.pack(fill="x", padx=8, pady=(2, 4))
 
         step_box = ctk.CTkFrame(s_card, fg_color="transparent")
-        step_box.pack(fill="x", padx=8, pady=(0, 6))
+        step_box.pack(fill="x", padx=8, pady=(0, 8))
 
-        ctk.CTkButton(
-            step_box,
-            text="0.9x",
-            width=42,
-            height=20,
-            font=ctk.CTkFont(size=10),
-            fg_color="#1c243a",
-            command=lambda: self._set_speed(0.9),
-        ).pack(side="left", padx=2)
-        ctk.CTkButton(
-            step_box,
-            text="1.0x",
-            width=42,
-            height=20,
-            font=ctk.CTkFont(size=10),
-            fg_color="#1c243a",
-            command=lambda: self._set_speed(1.0),
-        ).pack(side="left", padx=2)
-        ctk.CTkButton(
-            step_box,
-            text="1.15x",
-            width=48,
-            height=20,
-            font=ctk.CTkFont(size=10),
-            fg_color="#1c243a",
-            command=lambda: self._set_speed(1.15),
-        ).pack(side="left", padx=2)
-        ctk.CTkButton(
-            step_box,
-            text="1.25x",
-            width=48,
-            height=20,
-            font=ctk.CTkFont(size=10),
-            fg_color="#1c243a",
-            command=lambda: self._set_speed(1.25),
-        ).pack(side="left", padx=2)
+        for spd_label, spd_val in [("0.9x", 0.9), ("1.0x", 1.0), ("1.15x", 1.15), ("1.25x", 1.25)]:
+            ctk.CTkButton(
+                step_box,
+                text=spd_label,
+                width=45,
+                height=22,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+                fg_color="#1e2538",
+                corner_radius=4,
+                command=lambda v=spd_val: self._set_speed(v),
+            ).pack(side="left", padx=2)
 
         # 3. Studio Audio Master EQ Presets
-        eq_card = ctk.CTkFrame(right_box, fg_color=BG_CARD, corner_radius=10, border_width=1, border_color="#1e293b")
+        eq_card = ctk.CTkFrame(right_box, fg_color=BG_CARD, corner_radius=8, border_width=1, border_color=BORDER_SUBTLE)
         eq_card.pack(fill="x", padx=8, pady=4)
 
-        ctk.CTkLabel(eq_card, text="Studio Mastering EQ:", font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", padx=8, pady=(6, 2))
+        ctk.CTkLabel(eq_card, text="Studio Mastering EQ:", font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", padx=8, pady=(8, 2))
 
         self.master_eq_var = ctk.StringVar(value=MASTERING_PRESETS[0])
         self.master_eq_menu = ctk.CTkOptionMenu(
             eq_card,
             values=MASTERING_PRESETS,
             variable=self.master_eq_var,
-            height=28,
-            fg_color="#1c243a",
+            height=30,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            fg_color="#1e2538",
         )
         self.master_eq_menu.pack(fill="x", padx=8, pady=(0, 8))
 
-        # 4. Big Glowing Render Action Button
+        # 4. Big Clean Render Action Button
         render_frame = ctk.CTkFrame(right_box, fg_color="transparent")
         render_frame.pack(fill="x", padx=8, pady=(8, 4))
 
         self.btn_render = ctk.CTkButton(
             render_frame,
-            text="⚡ RENDER STUDIO MASTER",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            height=44,
-            fg_color=NEON_CYAN,
-            hover_color="#00b4d8",
-            text_color="#06080e",
-            corner_radius=8,
+            text="⚡ Render Studio Master",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+            height=42,
+            fg_color=ACCENT_PRIMARY,
+            hover_color="#1d4ed8",
+            corner_radius=6,
             command=self._generate_active_speech,
         )
         self.btn_render.pack(fill="x", pady=3)
@@ -798,13 +807,13 @@ class KokoroStudioApp(ctk.CTk):
         btn_save_audio = ctk.CTkButton(
             render_frame,
             text="💾 Save Audio File...",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             height=32,
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
             border_width=1,
-            border_color="#1e293b",
-            corner_radius=8,
+            border_color=BORDER_SUBTLE,
+            corner_radius=6,
             command=self._save_single_audio_as,
         )
         btn_save_audio.pack(fill="x", pady=2)
@@ -812,13 +821,13 @@ class KokoroStudioApp(ctk.CTk):
         btn_export_srt = ctk.CTkButton(
             render_frame,
             text="📜 Export Subtitles (.SRT)",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             height=32,
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
             border_width=1,
-            border_color="#1e293b",
-            corner_radius=8,
+            border_color=BORDER_SUBTLE,
+            corner_radius=6,
             command=self._export_single_srt,
         )
         btn_export_srt.pack(fill="x", pady=2)
@@ -837,25 +846,26 @@ class KokoroStudioApp(ctk.CTk):
         self.single_speed_val_label.configure(text=f"{val:.2f}x")
 
     # ------------------------------------------------------------------
-    # BOTTOM MASTER TRANSPORT DOCK WITH MULTI-COLOR GRADIENT WAVEFORM
+    # BOTTOM MASTER TRANSPORT DOCK WITH CRISP GRADIENT WAVEFORM
     # ------------------------------------------------------------------
 
     def _build_bottom_transport_dock(self):
-        dock = ctk.CTkFrame(self, height=92, corner_radius=12, fg_color=BG_PANEL, border_width=1, border_color="#182032")
+        dock = ctk.CTkFrame(self, height=88, corner_radius=10, fg_color=BG_PANEL, border_width=1, border_color=BORDER_SUBTLE)
         dock.pack(fill="x", side="bottom", padx=12, pady=(2, 6))
         dock.pack_propagate(False)
 
         t_left = ctk.CTkFrame(dock, fg_color="transparent")
-        t_left.pack(side="left", padx=12, pady=10)
+        t_left.pack(side="left", padx=12, pady=8)
 
         btn_back = ctk.CTkButton(
             t_left,
             text="⏪ 5s",
             width=46,
-            height=34,
-            font=ctk.CTkFont(size=10, weight="bold"),
+            height=32,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
+            corner_radius=4,
             command=lambda: self._seek_relative(-5.0),
         )
         btn_back.pack(side="left", padx=2)
@@ -864,10 +874,11 @@ class KokoroStudioApp(ctk.CTk):
             t_left,
             text="▶ Play",
             width=75,
-            height=34,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color=NEON_BLUE,
-            hover_color="#2563eb",
+            height=32,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            fg_color=ACCENT_PRIMARY,
+            hover_color="#1d4ed8",
+            corner_radius=4,
             command=self._toggle_playback,
         )
         self.btn_play_pause.pack(side="left", padx=3)
@@ -876,10 +887,11 @@ class KokoroStudioApp(ctk.CTk):
             t_left,
             text="⏹ Stop",
             width=62,
-            height=34,
-            font=ctk.CTkFont(size=11, weight="bold"),
+            height=32,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
+            corner_radius=4,
             command=self._stop_playback,
         )
         self.btn_stop.pack(side="left", padx=2)
@@ -888,10 +900,11 @@ class KokoroStudioApp(ctk.CTk):
             t_left,
             text="5s ⏩",
             width=46,
-            height=34,
-            font=ctk.CTkFont(size=10, weight="bold"),
+            height=32,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
+            corner_radius=4,
             command=lambda: self._seek_relative(5.0),
         )
         btn_fwd.pack(side="left", padx=2)
@@ -900,25 +913,26 @@ class KokoroStudioApp(ctk.CTk):
             t_left,
             text="🔁 Loop",
             width=58,
-            height=34,
-            font=ctk.CTkFont(size=10),
+            height=32,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
             fg_color=BG_CARD,
             hover_color=BG_CARD_HOVER,
+            corner_radius=4,
             command=self._toggle_loop,
         )
         self.btn_loop.pack(side="left", padx=3)
 
         t_center = ctk.CTkFrame(dock, fg_color="transparent")
-        t_center.pack(side="left", fill="both", expand=True, padx=8, pady=6)
+        t_center.pack(side="left", fill="both", expand=True, padx=8, pady=4)
 
         meta_line = ctk.CTkFrame(t_center, fg_color="transparent")
         meta_line.pack(fill="x")
 
         self.track_label = ctk.CTkLabel(
             meta_line,
-            text="⚡ No master audio loaded. Click 'RENDER STUDIO MASTER' to synthesize speech.",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color=TEXT_GLOW,
+            text="No audio loaded. Click 'Render Studio Master' to generate speech.",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
+            text_color=TEXT_PRIMARY,
         )
         self.track_label.pack(side="left")
 
@@ -926,27 +940,26 @@ class KokoroStudioApp(ctk.CTk):
             meta_line,
             text="00:00 / 00:00",
             font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-            text_color=NEON_CYAN,
+            text_color=ACCENT_CYAN,
         )
         self.time_label.pack(side="right")
 
-        # Live Canvas with Neon Styling
-        self.wave_canvas = Canvas(t_center, height=24, bg=BG_CARD, highlightthickness=0)
+        self.wave_canvas = Canvas(t_center, height=22, bg=BG_INPUT, highlightthickness=0)
         self.wave_canvas.pack(fill="x", pady=(2, 2))
 
-        self.playback_slider = ctk.CTkProgressBar(t_center, height=5, progress_color=NEON_CYAN, fg_color="#10141d")
+        self.playback_slider = ctk.CTkProgressBar(t_center, height=5, progress_color=ACCENT_PRIMARY, fg_color="#1a2233")
         self.playback_slider.set(0.0)
         self.playback_slider.pack(fill="x")
 
         t_right = ctk.CTkFrame(dock, fg_color="transparent")
-        t_right.pack(side="right", padx=14, pady=10)
+        t_right.pack(side="right", padx=12, pady=8)
 
         self.btn_mute = ctk.CTkButton(
             t_right,
             text="🔊",
             width=30,
             height=30,
-            font=ctk.CTkFont(size=12),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color="transparent",
             hover_color=BG_CARD_HOVER,
             command=self._toggle_mute,
@@ -959,20 +972,20 @@ class KokoroStudioApp(ctk.CTk):
             to=1.0,
             number_of_steps=20,
             width=90,
-            progress_color=NEON_CYAN,
+            progress_color=ACCENT_PRIMARY,
             command=lambda v: self.player.set_volume(v),
         )
         self.vol_slider.set(1.0)
         self.vol_slider.pack(side="left")
 
     def _build_statusbar(self):
-        status_frame = ctk.CTkFrame(self, height=22, corner_radius=0, fg_color="transparent")
+        status_frame = ctk.CTkFrame(self, height=20, corner_radius=0, fg_color="transparent")
         status_frame.pack(fill="x", side="bottom", padx=20, pady=(0, 2))
 
-        self.status_label = ctk.CTkLabel(status_frame, text="Ready", font=ctk.CTkFont(size=11), text_color=TEXT_MUTED)
+        self.status_label = ctk.CTkLabel(status_frame, text="Ready", font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=TEXT_MUTED)
         self.status_label.pack(side="left")
 
-        self.progress_bar = ctk.CTkProgressBar(status_frame, width=220, height=5, progress_color=NEON_CYAN)
+        self.progress_bar = ctk.CTkProgressBar(status_frame, width=220, height=4, progress_color=ACCENT_PRIMARY)
         self.progress_bar.set(0)
         self.progress_bar.pack(side="right")
 
@@ -982,7 +995,7 @@ class KokoroStudioApp(ctk.CTk):
         self.update_idletasks()
 
     # ------------------------------------------------------------------
-    # Playback, Seeking & Radiant Neon Spectrum Visualizer
+    # Playback, Seeking & Clean Spectrum Visualizer
     # ------------------------------------------------------------------
 
     def _poll_playback_and_waveform(self):
@@ -1019,17 +1032,14 @@ class KokoroStudioApp(ctk.CTk):
         bar_width = width / num_bars
         t = time.time() * 9.0
 
-        # Multi-color neon palette cycle
-        neon_colors = [NEON_CYAN, "#38bdf8", NEON_PURPLE, NEON_MAGENTA, NEON_EMERALD]
-
         for i in range(num_bars):
             if is_playing:
                 sine_val = (math.sin(t + i * 0.35) + 1.0) / 2.0
                 bar_h = 4 + (height - 8) * sine_val * random.uniform(0.7, 1.0)
-                color = neon_colors[int((i / num_bars) * len(neon_colors)) % len(neon_colors)]
+                color = ACCENT_PRIMARY if i % 2 == 0 else ACCENT_CYAN
             else:
                 bar_h = 3
-                color = "#1a2336"
+                color = "#1e293b"
 
             x0 = i * bar_width + 1
             x1 = (i + 1) * bar_width - 1
@@ -1073,7 +1083,7 @@ class KokoroStudioApp(ctk.CTk):
 
     def _toggle_loop(self):
         is_loop = self.player.toggle_loop()
-        self.btn_loop.configure(fg_color=NEON_BLUE if is_loop else BG_CARD)
+        self.btn_loop.configure(fg_color=ACCENT_PRIMARY if is_loop else BG_CARD)
 
     def _toggle_mute(self):
         self.is_muted = not self.is_muted
@@ -1091,7 +1101,7 @@ class KokoroStudioApp(ctk.CTk):
 
     def _save_project_file(self):
         data = {
-            "version": "2.0",
+            "version": "2.5",
             "timestamp": datetime.now().isoformat(),
             "single_script": self.single_text.get("1.0", "end"),
             "multi_script": self.multi_text.get("1.0", "end"),
@@ -1200,9 +1210,9 @@ class KokoroStudioApp(ctk.CTk):
 
         def _worker():
             self.is_synthesizing = True
-            self.btn_render.configure(state="disabled", text="⏳ MASTERING AUDIO...")
+            self.btn_render.configure(state="disabled", text="⏳ Mastering Audio...")
             try:
-                self.set_status(f"⚡ Rendering {voice_name_tag} with EQ [{eq_preset}]...", 0.3)
+                self.set_status(f"Rendering {voice_name_tag} with EQ [{eq_preset}]...", 0.3)
                 samples, sr = self.engine.synthesize_text(
                     text,
                     voice=voice_target,
@@ -1234,7 +1244,7 @@ class KokoroStudioApp(ctk.CTk):
                 self.set_status(f"Error: {e}", 0.0)
             finally:
                 self.is_synthesizing = False
-                self.btn_render.configure(state="normal", text="⚡ RENDER STUDIO MASTER")
+                self.btn_render.configure(state="normal", text="⚡ Render Studio Master")
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1272,7 +1282,7 @@ class KokoroStudioApp(ctk.CTk):
 
         def _worker():
             self.is_synthesizing = True
-            self.btn_render.configure(state="disabled", text="⏳ MASTERING DRAMA...")
+            self.btn_render.configure(state="disabled", text="⏳ Mastering Drama...")
             try:
                 self.current_audio_seg = self.engine.synthesize_dialogue(
                     dialogue_blocks=blocks,
@@ -1303,7 +1313,7 @@ class KokoroStudioApp(ctk.CTk):
                 self.set_status(f"Error: {e}", 0.0)
             finally:
                 self.is_synthesizing = False
-                self.btn_render.configure(state="normal", text="⚡ RENDER STUDIO MASTER")
+                self.btn_render.configure(state="normal", text="⚡ Render Studio Master")
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1317,7 +1327,7 @@ class KokoroStudioApp(ctk.CTk):
         eq_preset = self.master_eq_var.get()
 
         def _worker():
-            self.btn_render.configure(state="disabled", text="⏳ PROCESSING QUEUE...")
+            self.btn_render.configure(state="disabled", text="⏳ Processing Queue...")
             total = len(file_paths)
             for idx, f_path_str in enumerate(file_paths):
                 f_path = Path(f_path_str)
@@ -1339,7 +1349,7 @@ class KokoroStudioApp(ctk.CTk):
                     print(f"Batch item failed: {e}")
 
             self.set_status(f"✓ Batch conversion complete ({total} files).", 1.0)
-            self.btn_render.configure(state="normal", text="⚡ RENDER STUDIO MASTER")
+            self.btn_render.configure(state="normal", text="⚡ Render Studio Master")
             self._refresh_recent_history()
             messagebox.showinfo("Batch Complete", f"Successfully converted {total} files into:\n{self.output_dir}")
 
@@ -1367,21 +1377,21 @@ class KokoroStudioApp(ctk.CTk):
 
         voice_options = [f"{info['flag']} {info['name']}" for key, info in VOICE_CATALOG.items()]
         defaults = ["am_adam", "af_bella", "bm_george", "af_nicole", "af_sky", "am_michael"]
-        palette = [NEON_CYAN, NEON_PURPLE, NEON_EMERALD, NEON_AMBER, NEON_MAGENTA, NEON_BLUE]
+        palette = [ACCENT_PRIMARY, ACCENT_PURPLE, ACCENT_EMERALD, ACCENT_AMBER, "#ec4899", ACCENT_CYAN]
 
         self.multi_speaker_map = {}
         for idx, speaker in enumerate(speakers):
             color = palette[idx % len(palette)]
-            card = ctk.CTkFrame(self.speaker_panel, fg_color=BG_PANEL, corner_radius=8, border_width=1, border_color="#182032")
-            card.pack(fill="x", padx=2, pady=4)
+            card = ctk.CTkFrame(self.speaker_panel, fg_color=BG_PANEL, corner_radius=6, border_width=1, border_color=BORDER_SUBTLE)
+            card.pack(fill="x", padx=2, pady=3)
 
             badge = ctk.CTkLabel(
                 card,
                 text=f"  {speaker}  ",
-                font=ctk.CTkFont(size=11, weight="bold"),
+                font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
                 fg_color=color,
-                text_color="#06080e",
-                corner_radius=6,
+                text_color="#ffffff",
+                corner_radius=4,
             )
             badge.pack(anchor="w", padx=6, pady=(6, 2))
 
@@ -1390,7 +1400,7 @@ class KokoroStudioApp(ctk.CTk):
             def_opt = next((o for o in voice_options if def_name in o), voice_options[0])
 
             var = ctk.StringVar(value=def_opt)
-            menu = ctk.CTkOptionMenu(card, values=voice_options, variable=var, height=26, font=ctk.CTkFont(size=11), fg_color="#1c243a")
+            menu = ctk.CTkOptionMenu(card, values=voice_options, variable=var, height=26, font=ctk.CTkFont(family=FONT_FAMILY, size=11), fg_color="#1e2538")
             menu.pack(fill="x", padx=6, pady=(2, 6))
 
             self.multi_speaker_map[speaker] = var
@@ -1472,14 +1482,14 @@ class KokoroStudioApp(ctk.CTk):
             empty_lbl = ctk.CTkLabel(
                 self.history_scroll,
                 text="No generated audio files found.\nRender speech above to build your audio master library!",
-                font=ctk.CTkFont(size=12),
+                font=ctk.CTkFont(family=FONT_FAMILY, size=12),
                 text_color=TEXT_MUTED,
             )
             empty_lbl.pack(pady=30)
             return
 
         for f in audio_files[:30]:
-            card = ctk.CTkFrame(self.history_scroll, fg_color=BG_PANEL, corner_radius=8, border_width=1, border_color="#182032")
+            card = ctk.CTkFrame(self.history_scroll, fg_color=BG_PANEL, corner_radius=6, border_width=1, border_color=BORDER_SUBTLE)
             card.pack(fill="x", padx=4, pady=3)
 
             size_mb = f.stat().st_size / (1024 * 1024)
@@ -1488,17 +1498,18 @@ class KokoroStudioApp(ctk.CTk):
             info_col = ctk.CTkFrame(card, fg_color="transparent")
             info_col.pack(side="left", padx=10, pady=6)
 
-            ctk.CTkLabel(info_col, text=f"🎵 {f.name[:32]}", font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT_GLOW).pack(anchor="w")
-            ctk.CTkLabel(info_col, text=f"{mtime} • {size_mb:.2f} MB", font=ctk.CTkFont(size=10), text_color=TEXT_MUTED).pack(anchor="w")
+            ctk.CTkLabel(info_col, text=f"🎵 {f.name[:32]}", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"), text_color=TEXT_PRIMARY).pack(anchor="w")
+            ctk.CTkLabel(info_col, text=f"{mtime} • {size_mb:.2f} MB", font=ctk.CTkFont(family=FONT_FAMILY, size=10), text_color=TEXT_MUTED).pack(anchor="w")
 
             btn_play = ctk.CTkButton(
                 card,
                 text="▶ Play",
                 width=65,
                 height=26,
-                font=ctk.CTkFont(size=10, weight="bold"),
-                fg_color=NEON_BLUE,
-                hover_color="#2563eb",
+                font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
+                fg_color=ACCENT_PRIMARY,
+                hover_color="#1d4ed8",
+                corner_radius=4,
                 command=lambda path=f: self._play_history_file(path),
             )
             btn_play.pack(side="right", padx=8, pady=6)
