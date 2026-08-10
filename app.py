@@ -1061,6 +1061,9 @@ class KokoroStudioApp(ctk.CTk):
 
         self.wave_canvas = Canvas(t_center, height=22, bg=BG_INPUT, highlightthickness=0)
         self.wave_canvas.pack(fill="x", pady=(2, 2))
+        self.wave_bars = []
+        self.last_playing_state = False
+        self.wave_canvas.bind("<Configure>", lambda e: self._init_or_resize_waveform_bars())
 
         self.playback_slider = ctk.CTkProgressBar(t_center, height=5, progress_color=ACCENT_PRIMARY, fg_color="#1a2233")
         self.playback_slider.set(0.0)
@@ -1107,11 +1110,30 @@ class KokoroStudioApp(ctk.CTk):
     def set_status(self, text: str, progress: float = 0.0):
         self.status_label.configure(text=text)
         self.progress_bar.set(progress)
-        self.update_idletasks()
 
     # ------------------------------------------------------------------
-    # Playback, Seeking & Clean Spectrum Visualizer
+    # Playback, Seeking & Smooth Double-Buffered Spectrum Visualizer
     # ------------------------------------------------------------------
+
+    def _init_or_resize_waveform_bars(self):
+        self.wave_canvas.delete("all")
+        self.wave_bars.clear()
+        width = self.wave_canvas.winfo_width()
+        height = self.wave_canvas.winfo_height()
+        if width <= 1 or height <= 1:
+            return
+
+        num_bars = 52
+        bar_width = width / num_bars
+        idle_h = 3
+        y0 = (height - idle_h) / 2.0
+        y1 = y0 + idle_h
+
+        for i in range(num_bars):
+            x0 = i * bar_width + 1
+            x1 = (i + 1) * bar_width - 1
+            bar_id = self.wave_canvas.create_rectangle(x0, y0, x1, y1, fill="#1e293b", outline="")
+            self.wave_bars.append(bar_id)
 
     def _poll_playback_and_waveform(self):
         is_playing = self.player.is_playing()
@@ -1133,21 +1155,32 @@ class KokoroStudioApp(ctk.CTk):
         elif not is_playing and not self.player.is_paused():
             self.btn_play_pause.configure(text="▶ Play")
 
-        self._draw_waveform_bars(is_playing)
-        self.after(40, self._poll_playback_and_waveform)
+        # Animate bars efficiently
+        if is_playing:
+            self._update_waveform_bars(is_playing=True)
+            self.last_playing_state = True
+        elif self.last_playing_state:
+            self._update_waveform_bars(is_playing=False)
+            self.last_playing_state = False
 
-    def _draw_waveform_bars(self, is_playing: bool):
-        self.wave_canvas.delete("all")
+        self.after(50, self._poll_playback_and_waveform)
+
+    def _update_waveform_bars(self, is_playing: bool):
+        if not self.wave_bars:
+            self._init_or_resize_waveform_bars()
+            if not self.wave_bars:
+                return
+
         width = self.wave_canvas.winfo_width()
         height = self.wave_canvas.winfo_height()
         if width <= 1:
             return
 
-        num_bars = 52
+        num_bars = len(self.wave_bars)
         bar_width = width / num_bars
         t = time.time() * 9.0
 
-        for i in range(num_bars):
+        for i, bar_id in enumerate(self.wave_bars):
             if is_playing:
                 sine_val = (math.sin(t + i * 0.35) + 1.0) / 2.0
                 bar_h = 4 + (height - 8) * sine_val * random.uniform(0.7, 1.0)
@@ -1161,7 +1194,8 @@ class KokoroStudioApp(ctk.CTk):
             y0 = (height - bar_h) / 2.0
             y1 = y0 + bar_h
 
-            self.wave_canvas.create_rectangle(x0, y0, x1, y1, fill=color, outline="")
+            self.wave_canvas.coords(bar_id, x0, y0, x1, y1)
+            self.wave_canvas.itemconfig(bar_id, fill=color)
 
     def _format_sec(self, s: float) -> str:
         mins = int(s // 60)
