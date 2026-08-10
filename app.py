@@ -2,21 +2,19 @@
 Kokoro Voice Studio — Pro Edition Desktop Application
 =====================================================
 Studio-Grade, 100% Offline Text-to-Speech Desktop Application
-Powered by Kokoro-82M ONNX
+Powered by Kokoro-82M ONNX — Supports 8 Languages & 50+ Voices
 """
 
 from __future__ import annotations
 
-import math
 import os
-import random
 import re
 import sys
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from tkinter import Canvas, filedialog, messagebox
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 from PIL import Image
@@ -51,8 +49,8 @@ class KokoroStudioApp(ctk.CTk):
         super().__init__()
 
         # Window Settings
-        self.title("🎙️ Kokoro Voice Studio Pro — Offline AI Audio Engine")
-        self.geometry("1240x860")
+        self.title("🎙️ Kokoro Voice Studio Pro — Multilingual AI Audio Engine (50+ Voices)")
+        self.geometry("1260x880")
         self.minsize(1100, 750)
         self.configure(fg_color=BG_MAIN)
 
@@ -70,13 +68,8 @@ class KokoroStudioApp(ctk.CTk):
         self.current_duration_sec: float = 0.0
         self.is_synthesizing = False
         self.multi_speaker_map = {}
-        self.recent_files = []
         self.editor_font_size = 14
-
-        # Waveform animation timer
-        self.is_animating_wave = False
         self.playback_start_time = 0.0
-        self.seek_offset = 0.0
 
         # Build UI Architecture
         self._build_top_navbar()
@@ -95,10 +88,10 @@ class KokoroStudioApp(ctk.CTk):
 
     def _warmup_engine(self):
         try:
-            self.set_status("Initializing Kokoro-82M ONNX weights...", 0.3)
+            self.set_status("Initializing Kokoro-82M ONNX multilingual weights...", 0.3)
             self.engine.load_model()
-            self.set_status("Ready — Kokoro-82M Engine Active (CPU Real-Time Inference)", 1.0)
-            self.model_status_badge.configure(text="● Engine: Ready (CPU)", text_color=ACCENT_EMERALD)
+            self.set_status("Ready — 50+ Multilingual Voices Loaded across 8 Languages!", 1.0)
+            self.model_status_badge.configure(text="● Engine: Ready (50+ Voices)", text_color=ACCENT_EMERALD)
         except Exception as e:
             self.set_status(f"Error loading model: {e}", 0.0)
             self.model_status_badge.configure(text="● Engine: Error", text_color="#ef4444")
@@ -108,10 +101,9 @@ class KokoroStudioApp(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _build_top_navbar(self):
-        nav = ctk.CTkFrame(self, height=70, corner_radius=0, fg_color=BG_PANEL, border_width=1, border_color=BORDER_COLOR)
+        nav = ctk.CTkFrame(nav := self, height=70, corner_radius=0, fg_color=BG_PANEL, border_width=1, border_color=BORDER_COLOR)
         nav.pack(fill="x", side="top", padx=0, pady=0)
 
-        # Brand Container
         brand_frame = ctk.CTkFrame(nav, fg_color="transparent")
         brand_frame.pack(side="left", padx=25, pady=12)
 
@@ -125,17 +117,16 @@ class KokoroStudioApp(ctk.CTk):
 
         pro_badge = ctk.CTkLabel(
             brand_frame,
-            text="PRO v2.0",
+            text="MULTILINGUAL 50+ VOICES",
             font=ctk.CTkFont(size=10, weight="bold"),
             fg_color="#1e293b",
-            text_color="#94a3b8",
+            text_color="#38bdf8",
             corner_radius=6,
             padx=8,
             pady=2,
         )
         pro_badge.pack(side="left", padx=2)
 
-        # Model Status Badge
         self.model_status_badge = ctk.CTkLabel(
             nav,
             text="● Engine: Loading...",
@@ -144,14 +135,13 @@ class KokoroStudioApp(ctk.CTk):
         )
         self.model_status_badge.pack(side="left", padx=30)
 
-        # Right Action Buttons
         right_actions = ctk.CTkFrame(nav, fg_color="transparent")
         right_actions.pack(side="right", padx=20, pady=14)
 
         sample_lib_btn = ctk.CTkButton(
             right_actions,
-            text="🔊 Test Voices",
-            width=120,
+            text="🌍 Voice Catalog",
+            width=130,
             height=34,
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color=BG_CARD,
@@ -177,7 +167,6 @@ class KokoroStudioApp(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _build_main_content(self):
-        # Master Tabview
         self.tabview = ctk.CTkTabview(
             self,
             corner_radius=14,
@@ -206,14 +195,12 @@ class KokoroStudioApp(ctk.CTk):
     def _build_single_tab(self):
         tab = self.tab_single
 
-        # Top Toolbar for Single Tab
         toolbar = ctk.CTkFrame(tab, fg_color="transparent", height=35)
         toolbar.pack(fill="x", padx=15, pady=(5, 5))
 
         lbl = ctk.CTkLabel(toolbar, text="Script Editor", font=ctk.CTkFont(size=14, weight="bold"))
         lbl.pack(side="left")
 
-        # Quick Script Actions
         btn_paste = ctk.CTkButton(
             toolbar,
             text="📋 Paste",
@@ -250,7 +237,6 @@ class KokoroStudioApp(ctk.CTk):
         )
         btn_clear.pack(side="right", padx=4)
 
-        # Editor Box
         self.single_text = ctk.CTkTextbox(
             tab,
             font=ctk.CTkFont(family="Segoe UI", size=self.editor_font_size),
@@ -263,31 +249,43 @@ class KokoroStudioApp(ctk.CTk):
         self.single_text.pack(fill="both", expand=True, padx=15, pady=(0, 6))
         self.single_text.insert(
             "1.0",
-            "Welcome to Kokoro Voice Studio Pro. This is a studio-grade offline text to speech engine running entirely on your computer with zero cloud latency. Enjoy hyper-realistic narration, custom speed control, and multi-character dialogue generation for your videos and podcasts.",
+            "Welcome to Kokoro Voice Studio Pro! With over 50 studio-grade AI voices across English, Spanish, French, Hindi, Italian, Portuguese, and Japanese, you can create immersive narrations and dramatic character dialogues with zero cloud latency.",
         )
         self.single_text.bind("<KeyRelease>", self._update_single_stats)
 
-        # Stats Bar below editor
         self.stats_label = ctk.CTkLabel(
             tab,
-            text="📊 46 Words | 312 Characters | Est. 0:18 Duration",
+            text="📊 42 Words | 285 Characters | Est. 0:17 Duration",
             font=ctk.CTkFont(size=12),
             text_color=TEXT_MUTED,
         )
         self.stats_label.pack(anchor="w", padx=20, pady=(0, 8))
 
-        # Controls Card
         controls_card = ctk.CTkFrame(tab, fg_color=BG_CARD, corner_radius=12, border_width=1, border_color=BORDER_COLOR)
         controls_card.pack(fill="x", padx=15, pady=(0, 10))
 
-        # Grid config
-        controls_card.columnconfigure((0, 1, 2, 3, 4), weight=1)
+        # Language Filter
+        lang_frame = ctk.CTkFrame(controls_card, fg_color="transparent")
+        lang_frame.pack(side="left", padx=12, pady=12)
+
+        ctk.CTkLabel(lang_frame, text="Language Filter:", font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", pady=(0, 2))
+        self.lang_filter_var = ctk.StringVar(value="All Languages")
+        self.lang_filter_menu = ctk.CTkOptionMenu(
+            lang_frame,
+            values=self.engine.get_language_options(),
+            variable=self.lang_filter_var,
+            width=160,
+            height=34,
+            fg_color="#242b3d",
+            command=self._on_language_filter_changed,
+        )
+        self.lang_filter_menu.pack()
 
         # Voice Selector
         v_frame = ctk.CTkFrame(controls_card, fg_color="transparent")
-        v_frame.grid(row=0, column=0, columnspan=2, padx=15, pady=12, sticky="w")
+        v_frame.pack(side="left", padx=10, pady=12, fill="x", expand=True)
 
-        ctk.CTkLabel(v_frame, text="Narrator Voice:", font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", pady=(0, 2))
+        ctk.CTkLabel(v_frame, text="Narrator Voice (50+ Available):", font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", pady=(0, 2))
 
         voice_options = [label for _, label in self.engine.get_available_voices()]
         self.single_voice_var = ctk.StringVar(value=voice_options[0])
@@ -295,13 +293,12 @@ class KokoroStudioApp(ctk.CTk):
             v_frame,
             values=voice_options,
             variable=self.single_voice_var,
-            width=340,
             height=34,
             fg_color="#242b3d",
             button_color="#3b82f6",
             button_hover_color="#2563eb",
         )
-        self.single_voice_menu.pack(side="left", padx=(0, 8))
+        self.single_voice_menu.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
         btn_preview_curr = ctk.CTkButton(
             v_frame,
@@ -317,11 +314,11 @@ class KokoroStudioApp(ctk.CTk):
 
         # Speed Slider
         s_frame = ctk.CTkFrame(controls_card, fg_color="transparent")
-        s_frame.grid(row=0, column=2, padx=15, pady=12, sticky="w")
+        s_frame.pack(side="left", padx=12, pady=12)
 
         s_header = ctk.CTkFrame(s_frame, fg_color="transparent")
         s_header.pack(fill="x")
-        ctk.CTkLabel(s_header, text="Playback Speed:", font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
+        ctk.CTkLabel(s_header, text="Speed:", font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
         self.single_speed_val_label = ctk.CTkLabel(s_header, text="1.00x", font=ctk.CTkFont(size=12, weight="bold"), text_color=ACCENT_CYAN)
         self.single_speed_val_label.pack(side="right")
 
@@ -330,27 +327,12 @@ class KokoroStudioApp(ctk.CTk):
             from_=0.5,
             to=2.0,
             number_of_steps=30,
-            width=180,
+            width=150,
             progress_color=ACCENT_BLUE,
             command=self._on_single_speed_change,
         )
         self.single_speed_slider.set(1.0)
         self.single_speed_slider.pack(pady=(4, 0))
-
-        # Format Selector
-        fmt_frame = ctk.CTkFrame(controls_card, fg_color="transparent")
-        fmt_frame.grid(row=0, column=3, padx=15, pady=12, sticky="w")
-        ctk.CTkLabel(fmt_frame, text="Audio Format:", font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", pady=(0, 2))
-        self.single_fmt_var = ctk.StringVar(value="MP3 (192kbps)")
-        self.single_fmt_menu = ctk.CTkOptionMenu(
-            fmt_frame,
-            values=["MP3 (192kbps)", "WAV (Uncompressed)", "OGG (Vorbis)"],
-            variable=self.single_fmt_var,
-            width=160,
-            height=34,
-            fg_color="#242b3d",
-        )
-        self.single_fmt_menu.pack()
 
         # Action Buttons Row
         action_row = ctk.CTkFrame(tab, fg_color="transparent")
@@ -396,11 +378,17 @@ class KokoroStudioApp(ctk.CTk):
         )
         self.btn_single_srt.pack(side="left", fill="x", expand=True, padx=(8, 0))
 
+    def _on_language_filter_changed(self, choice: str):
+        voices = self.engine.get_available_voices(filter_lang=None if choice == "All Languages" else choice)
+        voice_labels = [label for _, label in voices]
+        if voice_labels:
+            self.single_voice_menu.configure(values=voice_labels)
+            self.single_voice_var.set(voice_labels[0])
+
     def _update_single_stats(self, event=None):
         text = self.single_text.get("1.0", "end").strip()
         words = len(text.split()) if text else 0
         chars = len(text)
-        # Average reading speed ~ 150 words per minute
         est_sec = int((words / 150) * 60)
         mins = est_sec // 60
         secs = est_sec % 60
@@ -440,7 +428,6 @@ class KokoroStudioApp(ctk.CTk):
     def _build_multi_tab(self):
         tab = self.tab_multi
 
-        # Header Helper
         top_bar = ctk.CTkFrame(tab, fg_color="transparent")
         top_bar.pack(fill="x", padx=15, pady=(5, 5))
 
@@ -476,11 +463,9 @@ class KokoroStudioApp(ctk.CTk):
         )
         btn_tmpl2.pack(side="right", padx=4)
 
-        # Main Split Frame
         split_frame = ctk.CTkFrame(tab, fg_color="transparent")
         split_frame.pack(fill="both", expand=True, padx=15, pady=5)
 
-        # Left: Script Text Editor
         self.multi_text = ctk.CTkTextbox(
             split_frame,
             font=ctk.CTkFont(family="Segoe UI", size=14),
@@ -494,13 +479,12 @@ class KokoroStudioApp(ctk.CTk):
         self.multi_text.insert(
             "1.0",
             "[Adam]: Have you tested the new multi-character synthesizer yet?\n"
-            "[Bella]: Yes! The voice transitions are seamless and it runs 100% offline.\n"
+            "[Bella]: Yes! The voice transitions are seamless and it supports 8 international languages.\n"
             "[George]: Indeed. The cadence and emotional depth sound exceptionally natural.\n"
             "[Adam]: Let's generate and export the full conversation right away!",
         )
 
-        # Right: Speaker Voice Mapping Container
-        right_container = ctk.CTkFrame(split_frame, width=400, fg_color=BG_CARD, corner_radius=12, border_width=1, border_color=BORDER_COLOR)
+        right_container = ctk.CTkFrame(split_frame, width=420, fg_color=BG_CARD, corner_radius=12, border_width=1, border_color=BORDER_COLOR)
         right_container.pack(side="right", fill="both", expand=False)
 
         rp_header = ctk.CTkFrame(right_container, fg_color="transparent")
@@ -523,7 +507,6 @@ class KokoroStudioApp(ctk.CTk):
         self.speaker_panel = ctk.CTkScrollableFrame(right_container, fg_color="transparent")
         self.speaker_panel.pack(fill="both", expand=True, padx=6, pady=5)
 
-        # Multi Options Row
         multi_opt_frame = ctk.CTkFrame(tab, fg_color=BG_CARD, corner_radius=10, border_width=1, border_color=BORDER_COLOR)
         multi_opt_frame.pack(fill="x", padx=15, pady=(5, 10))
 
@@ -546,7 +529,6 @@ class KokoroStudioApp(ctk.CTk):
         self.multi_pause_slider.set(350)
         self.multi_pause_slider.grid(row=0, column=1, padx=5, pady=10, sticky="w")
 
-        # Multi Action Buttons Row
         m_action_frame = ctk.CTkFrame(tab, fg_color="transparent")
         m_action_frame.pack(fill="x", padx=15, pady=5)
 
@@ -699,7 +681,6 @@ class KokoroStudioApp(ctk.CTk):
         )
         self.batch_files_listbox.pack(fill="both", expand=True, padx=15, pady=(0, 12))
 
-        # Batch Settings Bottom Bar
         b_bottom = ctk.CTkFrame(card, fg_color="transparent")
         b_bottom.pack(fill="x", padx=15, pady=(0, 15))
 
@@ -713,7 +694,7 @@ class KokoroStudioApp(ctk.CTk):
             b_bottom,
             values=voice_options,
             variable=self.batch_voice_var,
-            width=280,
+            width=320,
             height=32,
             fg_color="#242b3d",
         )
@@ -825,14 +806,13 @@ class KokoroStudioApp(ctk.CTk):
         self.btn_play_pause.configure(text="⏸ Pause")
 
     # ------------------------------------------------------------------
-    # Bottom Studio Audio Player Dock with Waveform
+    # Bottom Studio Audio Player Dock
     # ------------------------------------------------------------------
 
     def _build_player_dock(self):
         dock = ctk.CTkFrame(self, height=85, corner_radius=12, fg_color=BG_PANEL, border_width=1, border_color=BORDER_COLOR)
         dock.pack(fill="x", side="bottom", padx=20, pady=(4, 10))
 
-        # Controls Left
         ctrl_frame = ctk.CTkFrame(dock, fg_color="transparent")
         ctrl_frame.pack(side="left", padx=15, pady=12)
 
@@ -860,7 +840,6 @@ class KokoroStudioApp(ctk.CTk):
         )
         self.btn_stop.pack(side="left", padx=4)
 
-        # Center Track Info & Waveform Simulator Canvas
         center_frame = ctk.CTkFrame(dock, fg_color="transparent")
         center_frame.pack(side="left", fill="both", expand=True, padx=15, pady=8)
 
@@ -883,12 +862,10 @@ class KokoroStudioApp(ctk.CTk):
         )
         self.time_label.pack(side="right")
 
-        # Playback Progress Slider
         self.playback_slider = ctk.CTkProgressBar(center_frame, height=8, progress_color=ACCENT_CYAN, fg_color=BG_CARD)
         self.playback_slider.set(0.0)
         self.playback_slider.pack(fill="x", pady=(4, 0))
 
-        # Volume Controls Right
         vol_frame = ctk.CTkFrame(dock, fg_color="transparent")
         vol_frame.pack(side="right", padx=20, pady=12)
 
@@ -921,10 +898,6 @@ class KokoroStudioApp(ctk.CTk):
         self.status_label.configure(text=text)
         self.progress_bar.set(progress)
         self.update_idletasks()
-
-    # ------------------------------------------------------------------
-    # Playback Logic & Timeline Polling
-    # ------------------------------------------------------------------
 
     def _poll_playback_progress(self):
         if self.player.is_playing() and self.current_duration_sec > 0:
@@ -972,13 +945,21 @@ class KokoroStudioApp(ctk.CTk):
 
     def _open_voice_library_modal(self):
         win = ctk.CTkToplevel(self)
-        win.title("🎙️ Kokoro Voice Library & Sample Tester")
-        win.geometry("680x580")
+        win.title("🌍 Kokoro Multilingual Voice Catalog (50+ Voices)")
+        win.geometry("750x640")
         win.transient(self)
         win.configure(fg_color=BG_MAIN)
 
-        lbl = ctk.CTkLabel(win, text="🌟 Kokoro-82M Voice Catalog", font=ctk.CTkFont(size=18, weight="bold"), text_color=ACCENT_CYAN)
-        lbl.pack(pady=(20, 10))
+        lbl = ctk.CTkLabel(win, text="🌟 Multilingual Kokoro Voice Catalog", font=ctk.CTkFont(size=18, weight="bold"), text_color=ACCENT_CYAN)
+        lbl.pack(pady=(18, 6))
+
+        desc_lbl = ctk.CTkLabel(
+            win,
+            text="Explore 50+ studio voices across 8 languages with live audio preview testing.",
+            font=ctk.CTkFont(size=12),
+            text_color=TEXT_MUTED,
+        )
+        desc_lbl.pack(pady=(0, 10))
 
         scroll = ctk.CTkScrollableFrame(win, fg_color=BG_PANEL, corner_radius=10, border_width=1, border_color=BORDER_COLOR)
         scroll.pack(fill="both", expand=True, padx=20, pady=(0, 20))
@@ -988,12 +969,12 @@ class KokoroStudioApp(ctk.CTk):
             row.pack(fill="x", padx=6, pady=4)
 
             icon = "👩" if info["gender"] == "Female" else "👨"
-            accent_pill = "🇺🇸 " if info["accent"] == "American" else "🇬🇧 "
+            flag = info.get("flag", "🌐")
 
             left = ctk.CTkFrame(row, fg_color="transparent")
             left.pack(side="left", padx=12, pady=8)
 
-            ctk.CTkLabel(left, text=f"{icon} {info['name']} ({accent_pill}{info['accent']})", font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w")
+            ctk.CTkLabel(left, text=f"{flag} {icon} {info['name']} — {info['lang_name']}", font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w")
             ctk.CTkLabel(left, text=info["description"], font=ctk.CTkFont(size=11), text_color=TEXT_MUTED).pack(anchor="w")
 
             btn_test = ctk.CTkButton(
@@ -1009,12 +990,27 @@ class KokoroStudioApp(ctk.CTk):
             btn_test.pack(side="right", padx=12, pady=8)
 
     def _play_voice_sample(self, voice_key: str):
-        sample_text = f"Hello! I am {VOICE_CATALOG[voice_key]['name']}. This is a live demonstration of my speech quality."
+        info = VOICE_CATALOG.get(voice_key, {})
+        name = info.get("name", voice_key)
+        lang = info.get("lang", "en-us")
+
+        sample_phrases = {
+            "en-us": f"Hello! I am {name}. This is a live demonstration of my English speech quality.",
+            "en-gb": f"Good day! I am {name}. This is an authentic British English demonstration.",
+            "es": f"Hola! Soy {name}. Esta es una demostración de síntesis de voz en español.",
+            "fr-fr": f"Bonjour! Je m'appelle {name}. Bienvenue sur le studio de voix Kokoro.",
+            "hi": f"नमस्ते! मैं {name} हूँ। यह हिंदी आवाज़ का एक लाइव प्रदर्शन है।",
+            "it": f"Ciao! Sono {name}. Questa è una dimostrazione di sintesi vocale in italiano.",
+            "pt-br": f"Olá! Eu sou {name}. Esta é uma demonstração de síntese de voz em português.",
+            "ja": f"こんにちは！私は{name}です。日本語音声のデモンストレーションです。",
+        }
+
+        sample_text = sample_phrases.get(lang, f"Hello! I am {name}. Enjoy studio grade text to speech.")
 
         def _worker():
             try:
-                self.set_status(f"Synthesizing preview for {voice_key}...", 0.4)
-                samples, sr = self.engine.synthesize_text(sample_text, voice=voice_key, speed=1.0)
+                self.set_status(f"Synthesizing sample for {name} ({lang})...", 0.4)
+                samples, sr = self.engine.synthesize_text(sample_text, voice=voice_key, speed=1.0, lang=lang)
                 seg = self.engine.numpy_to_audiosegment(samples, sr)
                 self.player.play_segment(seg)
                 self.set_status("Ready", 1.0)
@@ -1024,7 +1020,7 @@ class KokoroStudioApp(ctk.CTk):
         threading.Thread(target=_worker, daemon=True).start()
 
     # ------------------------------------------------------------------
-    # Synthesis & Export Handlers
+    # Synthesis Handlers
     # ------------------------------------------------------------------
 
     def _generate_single_speech(self):
@@ -1055,12 +1051,10 @@ class KokoroStudioApp(ctk.CTk):
                 self.engine.export_audio(self.current_audio_seg, save_path, format="mp3")
                 self.current_audio_path = save_path
 
-                # Update UI
                 self.track_label.configure(text=f"🎵 {filename}")
                 self.time_label.configure(text=f"00:00 / {self._format_sec(self.current_duration_sec)}")
                 self.set_status("✓ Speech successfully synthesized and saved!", 1.0)
 
-                # Play audio
                 self.player.play_segment(self.current_audio_seg)
                 self.playback_start_time = time.time()
                 self.btn_play_pause.configure(text="⏸ Pause")
@@ -1215,7 +1209,7 @@ class KokoroStudioApp(ctk.CTk):
 
     def _get_selected_voice_key(self, display_label: str) -> str:
         for key, info in VOICE_CATALOG.items():
-            if display_label.startswith(info["name"]):
+            if f" {info['name']} " in display_label or display_label.startswith(key):
                 return key
         return "af_bella"
 
