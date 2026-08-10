@@ -84,6 +84,14 @@ class KokoroStudioApp(ctk.CTk):
         self.settings_file = self.base_dir / "settings.json"
         self.output_dir = self._load_saved_output_dir()
 
+        # Window Icon
+        icon_path = self.base_dir / "icon.ico"
+        if icon_path.exists():
+            try:
+                self.iconbitmap(str(icon_path))
+            except Exception:
+                pass
+
         self.engine = KokoroStudioEngine()
         self.player = AudioPlayer()
 
