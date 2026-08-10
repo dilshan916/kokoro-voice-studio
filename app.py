@@ -81,11 +81,14 @@ class KokoroStudioApp(ctk.CTk):
 
         # Core Components
         self.base_dir = Path(__file__).resolve().parent
-        self.settings_file = self.base_dir / "settings.json"
+        self.app_data_dir = self._get_app_data_dir()
+        self.settings_file = self.app_data_dir / "settings.json"
         self.output_dir = self._load_saved_output_dir()
 
         # Window Icon
         icon_path = self.base_dir / "icon.ico"
+        if not icon_path.exists():
+            icon_path = self.base_dir.parent / "icon.ico"
         if icon_path.exists():
             try:
                 self.iconbitmap(str(icon_path))
@@ -122,26 +125,65 @@ class KokoroStudioApp(ctk.CTk):
         threading.Thread(target=self._warmup_engine, daemon=True).start()
 
         # Start animation & timeline polling loop
-        self.after(40, self._poll_playback_and_waveform)
+        self.after(50, self._poll_playback_and_waveform)
+
+    def _get_app_data_dir(self) -> Path:
+        if sys.platform == "win32":
+            base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
+            app_dir = Path(base) / "KokoroStudio"
+        else:
+            app_dir = Path.home() / ".kokorostudio"
+        try:
+            app_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            app_dir = Path.home() / "KokoroStudio"
+            app_dir.mkdir(parents=True, exist_ok=True)
+        return app_dir
 
     def _load_saved_output_dir(self) -> Path:
-        default_dir = self.base_dir / "output"
-        default_dir.mkdir(parents=True, exist_ok=True)
+        # 1. Check if user already set a custom directory in settings.json
         if self.settings_file.exists():
             try:
                 with open(self.settings_file, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
                     saved = cfg.get("output_dir")
-                    if saved and Path(saved).exists():
-                        return Path(saved)
+                    if saved:
+                        p = Path(saved)
+                        p.mkdir(parents=True, exist_ok=True)
+                        return p
             except Exception:
                 pass
-        return default_dir
+
+        # 2. Check if local directory is writable (portable mode)
+        local_output = self.base_dir / "output"
+        if not str(self.base_dir).lower().startswith("c:\\program files"):
+            try:
+                local_output.mkdir(parents=True, exist_ok=True)
+                test_file = local_output / ".write_test"
+                test_file.touch()
+                test_file.unlink(missing_ok=True)
+                return local_output
+            except Exception:
+                pass
+
+        # 3. Default to user's Music / Documents folder (safe in Program Files mode)
+        for candidate in [
+            Path.home() / "Music" / "Kokoro Studio Output",
+            Path.home() / "Documents" / "Kokoro Studio Output",
+            self.app_data_dir / "output",
+        ]:
+            try:
+                candidate.mkdir(parents=True, exist_ok=True)
+                return candidate
+            except Exception:
+                continue
+
+        return self.app_data_dir
 
     def _save_custom_output_dir(self, custom_dir: Path):
         self.output_dir = custom_dir
-        self.output_dir.mkdir(parents=True, exist_ok=True)
         try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
             cfg = {}
             if self.settings_file.exists():
                 with open(self.settings_file, "r", encoding="utf-8") as f:
@@ -149,8 +191,8 @@ class KokoroStudioApp(ctk.CTk):
             cfg["output_dir"] = str(custom_dir)
             with open(self.settings_file, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error saving settings: {e}")
 
     def _warmup_engine(self):
         try:
