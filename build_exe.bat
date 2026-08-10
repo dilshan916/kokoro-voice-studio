@@ -7,21 +7,12 @@ echo ============================================================
 echo.
 cd /d "%~dp0"
 
-echo [1/3] Ensuring PyInstaller & dependencies are ready...
+echo [1/4] Ensuring PyInstaller & dependencies are ready...
 pip install pyinstaller Pillow --quiet
 
 echo.
-echo [2/3] Building Standalone Application Package with PyInstaller...
-pyinstaller --noconfirm --onedir --windowed ^
-    --icon="icon.ico" ^
-    --add-data "assets;assets" ^
-    --add-data "core;core" ^
-    --add-data "icon.ico;." ^
-    --add-data "icon.png;." ^
-    --collect-all customtkinter ^
-    --collect-all onnxruntime ^
-    --name "KokoroVoiceStudio" ^
-    app.py
+echo [2/4] Building Standalone Application Package via Spec...
+pyinstaller --noconfirm KokoroVoiceStudio.spec
 
 if not exist "dist\KokoroVoiceStudio\KokoroVoiceStudio.exe" (
     echo [ERROR] PyInstaller build failed!
@@ -30,11 +21,11 @@ if not exist "dist\KokoroVoiceStudio\KokoroVoiceStudio.exe" (
 )
 
 echo.
-echo Injecting kokoro_onnx configuration assets...
-python -c "import kokoro_onnx, os, shutil; src = os.path.dirname(kokoro_onnx.__file__); dst = os.path.join('dist', 'KokoroVoiceStudio', '_internal', 'kokoro_onnx'); os.makedirs(dst, exist_ok=True); shutil.copy(os.path.join(src, 'config.json'), os.path.join(dst, 'config.json')); print('kokoro_onnx/config.json injected successfully!')"
+echo [3/4] Mirroring Phonemizer & Linguistic Data Packages...
+python -c "import os, shutil, sys, importlib; pkgs = ['language_tags', 'kokoro_onnx', 'espeakng_loader', 'phonemizer', 'segments', 'csvw']; dist_internal = os.path.join('dist', 'KokoroVoiceStudio', '_internal'); [shutil.copytree(os.path.dirname(importlib.import_module(p).__file__), os.path.join(dist_internal, p)) for p in pkgs if (shutil.rmtree(os.path.join(dist_internal, p), ignore_errors=True) or True)]; print('All linguistic and phonemizer assets mirrored 100%!')"
 
 echo.
-echo [3/3] Compiling Windows Setup Installer with Inno Setup...
+echo [4/4] Compiling Windows Setup Installer with Inno Setup...
 set "ISCC_PATH=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC_PATH%" set "ISCC_PATH=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC_PATH%" set "ISCC_PATH=C:\Program Files\Inno Setup 6\ISCC.exe"
