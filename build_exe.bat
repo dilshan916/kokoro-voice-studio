@@ -7,7 +7,7 @@ echo ============================================================
 echo.
 cd /d "%~dp0"
 
-echo [1/3] Ensuring PyInstaller is installed...
+echo [1/3] Ensuring PyInstaller & dependencies are ready...
 pip install pyinstaller Pillow --quiet
 
 echo.
@@ -18,6 +18,8 @@ pyinstaller --noconfirm --onedir --windowed ^
     --add-data "core;core" ^
     --add-data "icon.ico;." ^
     --add-data "icon.png;." ^
+    --collect-all customtkinter ^
+    --collect-all onnxruntime ^
     --name "KokoroVoiceStudio" ^
     app.py
 
@@ -26,6 +28,10 @@ if not exist "dist\KokoroVoiceStudio\KokoroVoiceStudio.exe" (
     pause
     exit /b 1
 )
+
+echo.
+echo Injecting kokoro_onnx configuration assets...
+python -c "import kokoro_onnx, os, shutil; src = os.path.dirname(kokoro_onnx.__file__); dst = os.path.join('dist', 'KokoroVoiceStudio', '_internal', 'kokoro_onnx'); os.makedirs(dst, exist_ok=True); shutil.copy(os.path.join(src, 'config.json'), os.path.join(dst, 'config.json')); print('kokoro_onnx/config.json injected successfully!')"
 
 echo.
 echo [3/3] Compiling Windows Setup Installer with Inno Setup...
@@ -47,4 +53,3 @@ if exist "%ISCC_PATH%" (
 )
 
 echo.
-pause

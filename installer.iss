@@ -5,9 +5,6 @@
 #define MyAppVersion "2.5.0"
 #define MyAppPublisher "Dilshan Chandrarathne"
 #define MyAppExeName "KokoroVoiceStudio.exe"
-#define MyAppAssocName MyAppName + " Project"
-#define MyAppAssocExt ".kokoro"
-#define MyAppAssocKey StringChange(MyAppAssocName, " ", "") + MyAppAssocExt
 
 [Setup]
 AppId={{D1154A42-9981-4C3D-B916-K0K0R0STU010}
@@ -17,11 +14,10 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\Kokoro Voice Studio
 DefaultGroupName=Kokoro Voice Studio
 DisableProgramGroupPage=yes
-LicenseFile=
 OutputDir=dist_installer
 OutputBaseFilename=Kokoro_Voice_Studio_Setup_v2.5
 SetupIconFile=icon.ico
-Compression=lzma2/ultra64
+Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -34,6 +30,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
+Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "icon.png"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\KokoroVoiceStudio\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
