@@ -2,8 +2,9 @@
 Kokoro Voice Studio — Ultra-Sharp Modern Desktop Workstation (2026 Edition)
 ===========================================================================
 Crystal-Clear High-DPI Retina UI with 54 Multilingual Studio Voices.
-Features: Hardware-Accelerated Per-Monitor DPI Awareness, Crisp Modern Typography,
-Clean Studio Glassmorphism, Custom Neural Voice Blender, and CapCut/Premiere Export.
+Lead Developer: Dilshan Chandrarathne
+Features: Custom Output Directory Selection, Developer About & Credits Dialog,
+Hardware High-DPI Scaling, Custom Neural Voice Blender, and CapCut/Premiere Packaging.
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ from tkinter import Canvas, filedialog, messagebox
 # ==============================================================================
 if sys.platform == "win32":
     try:
-        # Per-Monitor V2 DPI awareness (Windows 10/11 native crisp rendering)
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except Exception:
         try:
@@ -46,25 +46,20 @@ from core.srt_generator import SubtitleGenerator
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-# ==============================================================================
-# 2026 MODERN PRO CREATIVE STUDIO PALETTE (Linear / Figma / ElevenLabs Dark)
-# ==============================================================================
-BG_OBSIDIAN = "#0b0e14"       # Deep, pure matte charcoal canvas
-BG_PANEL = "#111520"          # Refined elevated panel
-BG_CARD = "#171c2b"           # Sleek card container
-BG_CARD_HOVER = "#222a3f"     # Subtle card hover state
-BG_INPUT = "#0e121c"          # Clean text editor background
+# Modern Studio Palette Tokens
+BG_OBSIDIAN = "#0b0e14"
+BG_PANEL = "#111520"
+BG_CARD = "#171c2b"
+BG_CARD_HOVER = "#222a3f"
+BG_INPUT = "#0e121c"
 
-# Crisp Modern Accent Tokens
-ACCENT_PRIMARY = "#2563eb"    # Electric Studio Blue
-ACCENT_CYAN = "#38bdf8"       # Crisp Sky / Cyan Highlight
-ACCENT_PURPLE = "#818cf8"     # Indigo / Violet
-ACCENT_EMERALD = "#10b981"    # Clean Studio Emerald
-ACCENT_AMBER = "#f59e0b"      # Warm Accent
+ACCENT_PRIMARY = "#2563eb"
+ACCENT_CYAN = "#38bdf8"
+ACCENT_PURPLE = "#818cf8"
+ACCENT_EMERALD = "#10b981"
+ACCENT_AMBER = "#f59e0b"
 
-# Crisp Neutral Text & Subtle 1px Borders
 BORDER_SUBTLE = "#232b40"
-BORDER_FOCUS = "#38bdf8"
 TEXT_PRIMARY = "#ffffff"
 TEXT_SECONDARY = "#94a3b8"
 TEXT_MUTED = "#64748b"
@@ -79,15 +74,15 @@ class KokoroStudioApp(ctk.CTk):
         super().__init__()
 
         # Window Settings
-        self.title("Kokoro Voice Studio Pro — Modern AI Audio Workstation (54 Voices)")
+        self.title("Kokoro Voice Studio Pro — Developed by Dilshan Chandrarathne")
         self.geometry("1360x910")
         self.minsize(1180, 780)
         self.configure(fg_color=BG_OBSIDIAN)
 
         # Core Components
         self.base_dir = Path(__file__).resolve().parent
-        self.output_dir = self.base_dir / "output"
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.settings_file = self.base_dir / "settings.json"
+        self.output_dir = self._load_saved_output_dir()
 
         self.engine = KokoroStudioEngine()
         self.player = AudioPlayer()
@@ -121,6 +116,34 @@ class KokoroStudioApp(ctk.CTk):
         # Start animation & timeline polling loop
         self.after(40, self._poll_playback_and_waveform)
 
+    def _load_saved_output_dir(self) -> Path:
+        default_dir = self.base_dir / "output"
+        default_dir.mkdir(parents=True, exist_ok=True)
+        if self.settings_file.exists():
+            try:
+                with open(self.settings_file, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    saved = cfg.get("output_dir")
+                    if saved and Path(saved).exists():
+                        return Path(saved)
+            except Exception:
+                pass
+        return default_dir
+
+    def _save_custom_output_dir(self, custom_dir: Path):
+        self.output_dir = custom_dir
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            cfg = {}
+            if self.settings_file.exists():
+                with open(self.settings_file, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+            cfg["output_dir"] = str(custom_dir)
+            with open(self.settings_file, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2)
+        except Exception:
+            pass
+
     def _warmup_engine(self):
         try:
             self.set_status("Loading Kokoro-82M ONNX weights...", 0.3)
@@ -132,16 +155,15 @@ class KokoroStudioApp(ctk.CTk):
             self.model_status_badge.configure(text="● Engine Error", text_color="#ef4444")
 
     # ------------------------------------------------------------------
-    # Top Sleek Navigation Bar
+    # Top Sleek Navigation Bar with Custom Output & About Modals
     # ------------------------------------------------------------------
 
     def _build_top_navbar(self):
         nav = ctk.CTkFrame(self, height=60, corner_radius=0, fg_color=BG_PANEL, border_width=1, border_color=BORDER_SUBTLE)
         nav.pack(fill="x", side="top", padx=0, pady=0)
 
-        # Brand Container
         brand_frame = ctk.CTkFrame(nav, fg_color="transparent")
-        brand_frame.pack(side="left", padx=20, pady=8)
+        brand_frame.pack(side="left", padx=18, pady=8)
 
         logo_title = ctk.CTkLabel(
             brand_frame,
@@ -169,16 +191,31 @@ class KokoroStudioApp(ctk.CTk):
             font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
             text_color=ACCENT_AMBER,
         )
-        self.model_status_badge.pack(side="left", padx=25)
+        self.model_status_badge.pack(side="left", padx=20)
 
-        # Right Action Buttons
         right_actions = ctk.CTkFrame(nav, fg_color="transparent")
         right_actions.pack(side="right", padx=15, pady=10)
+
+        # About & Credits Dialog Button
+        btn_about = ctk.CTkButton(
+            right_actions,
+            text="ℹ️ About",
+            width=80,
+            height=32,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            fg_color=BG_CARD,
+            hover_color=BG_CARD_HOVER,
+            border_width=1,
+            border_color=BORDER_SUBTLE,
+            corner_radius=6,
+            command=self._open_about_dialog,
+        )
+        btn_about.pack(side="left", padx=3)
 
         btn_save_proj = ctk.CTkButton(
             right_actions,
             text="💾 Save Project",
-            width=110,
+            width=105,
             height=32,
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color=BG_CARD,
@@ -188,12 +225,12 @@ class KokoroStudioApp(ctk.CTk):
             corner_radius=6,
             command=self._save_project_file,
         )
-        btn_save_proj.pack(side="left", padx=4)
+        btn_save_proj.pack(side="left", padx=3)
 
         btn_open_proj = ctk.CTkButton(
             right_actions,
             text="📂 Open Project",
-            width=110,
+            width=105,
             height=32,
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color=BG_CARD,
@@ -203,12 +240,12 @@ class KokoroStudioApp(ctk.CTk):
             corner_radius=6,
             command=self._load_project_file,
         )
-        btn_open_proj.pack(side="left", padx=4)
+        btn_open_proj.pack(side="left", padx=3)
 
         btn_capcut = ctk.CTkButton(
             right_actions,
             text="🎬 CapCut Package",
-            width=135,
+            width=130,
             height=32,
             font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
             fg_color="#4f46e5",
@@ -216,20 +253,92 @@ class KokoroStudioApp(ctk.CTk):
             corner_radius=6,
             command=self._export_capcut_package,
         )
-        btn_capcut.pack(side="left", padx=4)
+        btn_capcut.pack(side="left", padx=3)
 
-        open_folder_btn = ctk.CTkButton(
+        # Change Output Folder Button
+        self.btn_change_out = ctk.CTkButton(
             right_actions,
-            text="📁 Output Folder",
-            width=115,
+            text="📁 Change Output",
+            width=125,
             height=32,
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color="#0284c7",
             hover_color="#0369a1",
             corner_radius=6,
-            command=self._open_output_folder,
+            command=self._select_custom_output_dir,
         )
-        open_folder_btn.pack(side="left", padx=4)
+        self.btn_change_out.pack(side="left", padx=3)
+
+    def _open_about_dialog(self):
+        """Display clean professional About & Credits Modal."""
+        win = ctk.CTkToplevel(self)
+        win.title("About Kokoro Voice Studio Pro")
+        win.geometry("540x480")
+        win.resizable(False, False)
+        win.transient(self)
+        win.configure(fg_color=BG_PANEL)
+
+        card = ctk.CTkFrame(win, fg_color=BG_CARD, corner_radius=10, border_width=1, border_color=BORDER_SUBTLE)
+        card.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Title & Badge
+        ctk.CTkLabel(card, text="🎙️ Kokoro Voice Studio Pro", font=ctk.CTkFont(family=FONT_FAMILY, size=18, weight="bold"), text_color=TEXT_PRIMARY).pack(pady=(18, 2))
+        ctk.CTkLabel(card, text="Version 2.5 • Desktop Audio Workstation", font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=ACCENT_CYAN).pack(pady=(0, 14))
+
+        # Dev Info
+        dev_frame = ctk.CTkFrame(card, fg_color=BG_INPUT, corner_radius=8, border_width=1, border_color=BORDER_SUBTLE)
+        dev_frame.pack(fill="x", padx=16, pady=8)
+
+        ctk.CTkLabel(dev_frame, text="👤 Lead Developer & Architect:", font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", padx=12, pady=(10, 2))
+        ctk.CTkLabel(dev_frame, text="Dilshan Chandrarathne", font=ctk.CTkFont(family=FONT_FAMILY, size=15, weight="bold"), text_color=TEXT_PRIMARY).pack(anchor="w", padx=12, pady=(0, 10))
+
+        # Credits & Specs
+        specs_frame = ctk.CTkFrame(card, fg_color=BG_INPUT, corner_radius=8, border_width=1, border_color=BORDER_SUBTLE)
+        specs_frame.pack(fill="x", padx=16, pady=8)
+
+        credits_info = [
+            ("🧠 AI Voice Model:", "Kokoro-82M (Hexgrad)"),
+            ("⚡ Inference Engine:", "ONNX Runtime (100% Offline Local CPU)"),
+            ("🌍 Language Support:", "8 Languages (54 Studio Character Voices)"),
+            ("🎛️ Special Features:", "Neural Voice Blender, Master EQ, CapCut Exporter"),
+            ("🛡️ Privacy:", "Zero Data Sent to Cloud • 100% Offline"),
+        ]
+
+        for title, val in credits_info:
+            row = ctk.CTkFrame(specs_frame, fg_color="transparent")
+            row.pack(fill="x", padx=12, pady=2)
+            ctk.CTkLabel(row, text=title, font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
+            ctk.CTkLabel(row, text=val, font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=TEXT_SECONDARY).pack(side="right")
+
+        ctk.CTkLabel(card, text="© 2026 Dilshan Chandrarathne. All rights reserved.", font=ctk.CTkFont(family=FONT_FAMILY, size=10), text_color=TEXT_MUTED).pack(pady=(12, 6))
+
+        btn_close = ctk.CTkButton(
+            card,
+            text="Close",
+            width=100,
+            height=30,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
+            fg_color=ACCENT_PRIMARY,
+            hover_color="#1d4ed8",
+            corner_radius=6,
+            command=win.destroy,
+        )
+        btn_close.pack(pady=(0, 12))
+
+    def _select_custom_output_dir(self):
+        """Allow user to select any custom destination folder on their PC."""
+        chosen = filedialog.askdirectory(
+            title="Select Default Output Directory for Rendered Audio",
+            initialdir=str(self.output_dir),
+        )
+        if chosen:
+            chosen_path = Path(chosen)
+            self._save_custom_output_dir(chosen_path)
+            self._refresh_recent_history()
+            messagebox.showinfo(
+                "Output Folder Updated",
+                f"Default output folder successfully set to:\n\n📂 {chosen_path}\n\nAll future audio and CapCut packages will be saved here.",
+            )
 
     # ------------------------------------------------------------------
     # Main 3-Pane Studio Workspace
@@ -468,7 +577,6 @@ class KokoroStudioApp(ctk.CTk):
     def _build_single_script_tab(self):
         tab = self.tab_single
 
-        # SSML & Quick Insert Toolbar
         ssml_bar = ctk.CTkFrame(tab, fg_color="transparent", height=32)
         ssml_bar.pack(fill="x", padx=6, pady=(2, 6))
 
@@ -529,7 +637,6 @@ class KokoroStudioApp(ctk.CTk):
         )
         btn_clear.pack(side="right", padx=2)
 
-        # Script Editor Box
         self.single_text = ctk.CTkTextbox(
             tab,
             font=ctk.CTkFont(family=FONT_FAMILY, size=self.editor_font_size),
@@ -1102,6 +1209,7 @@ class KokoroStudioApp(ctk.CTk):
     def _save_project_file(self):
         data = {
             "version": "2.5",
+            "developer": "Dilshan Chandrarathne",
             "timestamp": datetime.now().isoformat(),
             "single_script": self.single_text.get("1.0", "end"),
             "multi_script": self.multi_text.get("1.0", "end"),
@@ -1481,7 +1589,7 @@ class KokoroStudioApp(ctk.CTk):
         if not audio_files:
             empty_lbl = ctk.CTkLabel(
                 self.history_scroll,
-                text="No generated audio files found.\nRender speech above to build your audio master library!",
+                text="No generated audio files found in output directory.\nRender speech above to build your audio master library!",
                 font=ctk.CTkFont(family=FONT_FAMILY, size=12),
                 text_color=TEXT_MUTED,
             )
