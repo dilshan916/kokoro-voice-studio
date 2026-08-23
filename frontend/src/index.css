@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #262c42 #0f111a;
+  }
+
+  /* Custom Scrollbar for Studio DAW Look */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0f111a;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #262c42;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #353c5a;
+  }
+}
+
+/* Glassmorphism DAW Panel Utilities */
+.glass-panel {
+  background: rgba(21, 24, 36, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(38, 44, 66, 0.7);
+}
+
+.glass-card {
+  background: rgba(26, 30, 46, 0.65);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(38, 44, 66, 0.5);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  background: rgba(32, 38, 58, 0.9);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+/* Glow effects */
+.glow-primary {
+  box-shadow: 0 0 20px -3px rgba(99, 102, 241, 0.4);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 20px -3px rgba(6, 182, 212, 0.4);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 20px -3px rgba(16, 185, 129, 0.4);
+}
+
+/* Audio Waveform Canvas Styling */
+.waveform-canvas {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+/* Custom range sliders */
+input[type="range"] {
+  accent-color: #6366f1;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 50%;
+  background: #6366f1;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.8);
+  border: 2px solid #ffffff;
+}

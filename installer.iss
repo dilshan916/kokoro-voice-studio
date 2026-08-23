@@ -1,5 +1,5 @@
-; Inno Setup Script for Kokoro Voice Studio Pro v2.5
-; Lead Developer: Dilshan Chandrarathne
+; Inno Setup Script for Kokoro Voice Studio Pro v2.5.0
+; Lead Developer & Architect: Dilshan Chandrarathne
 
 #define MyAppName "Kokoro Voice Studio Pro"
 #define MyAppVersion "2.5.0"
@@ -12,7 +12,7 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\Kokoro Voice Studio
-DefaultGroupName=Kokoro Voice Studio
+DefaultGroupName=Kokoro Voice Studio Pro
 DisableProgramGroupPage=yes
 OutputDir=dist_installer
 OutputBaseFilename=Kokoro_Voice_Studio_Setup_v2.5

@@ -198,8 +198,8 @@ class KokoroStudioApp(ctk.CTk):
         try:
             self.set_status("Loading Kokoro-82M ONNX weights...", 0.3)
             self.engine.load_model()
-            self.set_status("Ready — 54 Studio Voices Active across 8 Languages", 1.0)
-            self.model_status_badge.configure(text="● Engine Active (54 Voices)", text_color=ACCENT_EMERALD)
+            self.set_status("Ready — 60 Studio Voices Active across 9+ Languages (Multilingual G2P)", 1.0)
+            self.model_status_badge.configure(text="● Engine Active (60 Voices)", text_color=ACCENT_EMERALD)
         except Exception as e:
             self.set_status(f"Error loading model: {e}", 0.0)
             self.model_status_badge.configure(text="● Engine Error", text_color="#ef4444")
@@ -349,8 +349,8 @@ class KokoroStudioApp(ctk.CTk):
         credits_info = [
             ("🧠 AI Voice Model:", "Kokoro-82M (Hexgrad)"),
             ("⚡ Inference Engine:", "ONNX Runtime (100% Offline Local CPU)"),
-            ("🌍 Language Support:", "8 Languages (54 Studio Character Voices)"),
-            ("🎛️ Special Features:", "Neural Voice Blender, Master EQ, CapCut Exporter"),
+            ("🌍 Language Support:", "9+ Languages (60 Studio Character Voices)"),
+            ("🎛️ Special Features:", "Multilingual G2P, Neural Voice Blender, Master EQ, CapCut Exporter"),
             ("🛡️ Privacy:", "Zero Data Sent to Cloud • 100% Offline"),
         ]
 
@@ -502,7 +502,7 @@ class KokoroStudioApp(ctk.CTk):
             child.destroy()
 
         for key, info in VOICE_CATALOG.items():
-            if filter_lang != "All Languages" and info["lang_name"] != filter_lang:
+            if filter_lang not in ("All Languages", "🌐 Auto-Detect Language") and info["lang_name"] != filter_lang:
                 continue
 
             card = ctk.CTkFrame(self.scroll_voices, fg_color=BG_CARD, corner_radius=6, border_width=1, border_color=BORDER_SUBTLE)
@@ -580,6 +580,9 @@ class KokoroStudioApp(ctk.CTk):
             "it": f"Ciao! Sono {info['name']}. Questa è una dimostrazione in italiano.",
             "pt-br": f"Olá! Eu sou {info['name']}. Esta é uma demonstração em português.",
             "ja": f"こんにちは！私は{info['name']}です。日本語音声のデモンストレーションです。",
+            "cmn": f"你好！我是{info['name']}。这是普通话多语言语音合成演示。",
+            "ko": f"안녕하세요! 저는 {info['name']}입니다. 한국어 음성 합성 데모입니다.",
+            "de": f"Hallo! Ich bin {info['name']}. Dies ist eine Demonstration in deutscher Sprache.",
         }
         text = sample_phrases.get(lang, f"Hello, I am {info['name']}.")
 
@@ -863,7 +866,7 @@ class KokoroStudioApp(ctk.CTk):
         l_line = ctk.CTkFrame(v_card, fg_color="transparent")
         l_line.pack(fill="x", padx=8, pady=(8, 2))
         ctk.CTkLabel(l_line, text="Language:", font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"), text_color=TEXT_MUTED).pack(side="left")
-        self.right_lang_var = ctk.StringVar(value="All Languages")
+        self.right_lang_var = ctk.StringVar(value="🌐 Auto-Detect Language")
         self.right_lang_menu = ctk.CTkOptionMenu(
             l_line,
             values=self.engine.get_language_options(),
@@ -876,7 +879,7 @@ class KokoroStudioApp(ctk.CTk):
         )
         self.right_lang_menu.pack(side="right")
 
-        ctk.CTkLabel(v_card, text="Studio Voice (54 Available):", font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", padx=8, pady=(6, 2))
+        ctk.CTkLabel(v_card, text="Studio Voice (60 Available):", font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"), text_color=TEXT_MUTED).pack(anchor="w", padx=8, pady=(6, 2))
 
         voice_options = [f"{info['flag']} {info['name']} ({info['gender']}, {info['lang_name']})" for key, info in VOICE_CATALOG.items()]
         self.single_voice_var = ctk.StringVar(value=voice_options[0])
@@ -992,7 +995,7 @@ class KokoroStudioApp(ctk.CTk):
     def _on_right_lang_filter_changed(self, choice: str):
         filtered = []
         for key, info in VOICE_CATALOG.items():
-            if choice == "All Languages" or info["lang_name"] == choice:
+            if choice in ("All Languages", "🌐 Auto-Detect Language") or info["lang_name"] == choice:
                 filtered.append(f"{info['flag']} {info['name']} ({info['gender']}, {info['lang_name']})")
         if filtered:
             self.single_voice_menu.configure(values=filtered)
@@ -1400,15 +1403,19 @@ class KokoroStudioApp(ctk.CTk):
             voice_target = self._get_selected_voice_key(voice_display)
             voice_name_tag = voice_target
 
+        selected_lang = self.right_lang_var.get()
+        target_lang = "auto" if selected_lang in ("All Languages", "🌐 Auto-Detect Language") else selected_lang
+
         def _worker():
             self.is_synthesizing = True
             self.btn_render.configure(state="disabled", text="⏳ Mastering Audio...")
             try:
-                self.set_status(f"Rendering {voice_name_tag} with EQ [{eq_preset}]...", 0.3)
+                self.set_status(f"Rendering {voice_name_tag} [{target_lang}] with EQ [{eq_preset}]...", 0.3)
                 samples, sr = self.engine.synthesize_text(
                     text,
                     voice=voice_target,
                     speed=speed,
+                    lang=target_lang,
                     master_preset=eq_preset,
                 )
 
@@ -1454,13 +1461,11 @@ class KokoroStudioApp(ctk.CTk):
             line = line.strip()
             if not line:
                 continue
-            match = re.match(r"^\[([a-zA-Z0-9_\s]+)\]\s*:\s*(.+)$", line)
-            if match:
-                speaker = match.group(1).strip()
-                dialogue = match.group(2).strip()
-                blocks.append({"speaker": speaker, "text": dialogue})
+            speaker, lang_qual, dialogue = self.engine.g2p.parse_dialogue_line(line)
+            if speaker:
+                blocks.append({"speaker": speaker, "lang": lang_qual, "text": dialogue})
             else:
-                blocks.append({"speaker": "Narrator", "text": line})
+                blocks.append({"speaker": "Narrator", "lang": None, "text": dialogue})
 
         if not blocks:
             messagebox.showwarning("Invalid Script", "No character turns detected.")
@@ -1558,11 +1563,9 @@ class KokoroStudioApp(ctk.CTk):
         text = self.multi_text.get("1.0", "end")
         speakers = []
         for line in text.splitlines():
-            match = re.match(r"^\[([a-zA-Z0-9_\s]+)\]\s*:", line.strip())
-            if match:
-                s = match.group(1).strip()
-                if s not in speakers:
-                    speakers.append(s)
+            speaker, _, _ = self.engine.g2p.parse_dialogue_line(line.strip())
+            if speaker and speaker not in speakers:
+                speakers.append(speaker)
 
         if not speakers:
             speakers = ["Narrator"]
@@ -1600,6 +1603,10 @@ class KokoroStudioApp(ctk.CTk):
     def _get_selected_voice_key(self, display_label: str) -> str:
         for key, info in VOICE_CATALOG.items():
             if info["name"] in display_label or display_label.startswith(key):
+                return key
+            # Match flag + name
+            flag_name = f"{info.get('flag', '')} {info['name']}".strip()
+            if flag_name and flag_name in display_label:
                 return key
         return "af_bella"
 

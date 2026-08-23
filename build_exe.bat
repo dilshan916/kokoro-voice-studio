@@ -1,17 +1,29 @@
 @echo off
 title Build Kokoro Voice Studio Pro Windows Installer
 echo ============================================================
-echo   Kokoro Voice Studio Pro - Professional Build Engine
+echo   Kokoro Voice Studio Pro - Windows Installer Builder
 echo   Lead Developer: Dilshan Chandrarathne
 echo ============================================================
 echo.
 cd /d "%~dp0"
 
-echo [1/4] Ensuring PyInstaller & dependencies are ready...
+echo [1/5] Building React 19 Frontend Production Bundle...
+cd frontend
+call npm run build
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] Frontend build failed!
+    cd ..
+    pause
+    exit /b 1
+)
+cd ..
+
+echo.
+echo [2/5] Ensuring PyInstaller and dependencies are ready...
 pip install pyinstaller Pillow --quiet
 
 echo.
-echo [2/4] Building Standalone Application Package via Spec...
+echo [3/5] Compiling Standalone Desktop Application with PyInstaller...
 pyinstaller --noconfirm KokoroVoiceStudio.spec
 
 if not exist "dist\KokoroVoiceStudio\KokoroVoiceStudio.exe" (
@@ -21,11 +33,11 @@ if not exist "dist\KokoroVoiceStudio\KokoroVoiceStudio.exe" (
 )
 
 echo.
-echo [3/4] Mirroring Phonemizer & Linguistic Data Packages...
-python -c "import os, shutil, sys, importlib; pkgs = ['language_tags', 'kokoro_onnx', 'espeakng_loader', 'phonemizer', 'segments', 'csvw']; dist_internal = os.path.join('dist', 'KokoroVoiceStudio', '_internal'); [shutil.copytree(os.path.dirname(importlib.import_module(p).__file__), os.path.join(dist_internal, p)) for p in pkgs if (shutil.rmtree(os.path.join(dist_internal, p), ignore_errors=True) or True)]; print('All linguistic and phonemizer assets mirrored 100%!')"
+echo [4/5] Mirroring Phonemizer, Janome and Linguistic Dictionaries...
+python -c "import os, shutil, sys, importlib; pkgs = ['language_tags', 'kokoro_onnx', 'espeakng_loader', 'phonemizer', 'segments', 'csvw', 'langdetect', 'janome', 'pykakasi', 'jaconv']; dist_internal = os.path.join('dist', 'KokoroVoiceStudio', '_internal'); [shutil.copytree(os.path.dirname(importlib.import_module(p).__file__), os.path.join(dist_internal, p)) for p in pkgs if (shutil.rmtree(os.path.join(dist_internal, p), ignore_errors=True) or True)]; print('All linguistic and phonemizer packages mirrored successfully!')"
 
 echo.
-echo [4/4] Compiling Windows Setup Installer with Inno Setup...
+echo [5/5] Compiling Windows Setup Installer with Inno Setup...
 set "ISCC_PATH=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC_PATH%" set "ISCC_PATH=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC_PATH%" set "ISCC_PATH=C:\Program Files\Inno Setup 6\ISCC.exe"

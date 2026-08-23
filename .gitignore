@@ -2,15 +2,27 @@
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
 
-# Output Audio
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Binary Models & Voices (Auto-downloaded on first run in Cloud / Docker)
+assets/kokoro/*.onnx
+assets/kokoro/*.bin
+cloudflared.exe
+
+# Output Audio & Cache
 output/*.mp3
 output/*.wav
 output/*.ogg
 output/*.srt
 
-# Virtualenv & Build
+# Virtualenv & PyInstaller Builds
 dist/
+dist_installer/
 build/
 *.spec
 .venv/
