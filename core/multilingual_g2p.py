@@ -131,8 +131,8 @@ _IPA_SUBSTITUTIONS = {
 _JA_M2P: Dict[str, str] = {
     chr(12449): 'a', chr(12450): 'a', chr(12451): 'i', chr(12452): 'i', chr(12453): 'u',
     chr(12454): 'u', chr(12455): 'e', chr(12456): 'e', chr(12457): 'o', chr(12458): 'o',
-    chr(12459): 'ka', chr(12460): 'ga', chr(12461): 'ki', chr(12462): 'gi', chr(12463): 'ku',
-    chr(12464): 'gu', chr(12465): 'ke', chr(12466): 'ge', chr(12467): 'ko', chr(12468): 'go',
+    chr(12459): 'ka', chr(12460): 'ɡa', chr(12461): 'ki', chr(12462): 'ɡi', chr(12463): 'ku',
+    chr(12464): 'ɡu', chr(12465): 'ke', chr(12466): 'ɡe', chr(12467): 'ko', chr(12468): 'ɡo',
     chr(12469): 'sa', chr(12470): 'za', chr(12471): 'ɕi', chr(12472): 'ʥi', chr(12473): 'su',
     chr(12474): 'zu', chr(12475): 'se', chr(12476): 'ze', chr(12477): 'so', chr(12478): 'zo',
     chr(12479): 'ta', chr(12480): 'da', chr(12481): 'ʨi', chr(12482): 'ʥi', chr(12484): 'ʦu',
@@ -447,8 +447,8 @@ class MultilingualG2P:
         if not ipa_raw:
             ipa_raw = text
 
-        # Japanese IPA phoneme adjustments: 'u' -> 'ɯ', 'f' -> 'ɸ'
-        ipa_raw = ipa_raw.replace("u", "ɯ").replace("f", "ɸ")
+        # Japanese IPA phoneme adjustments: 'u' -> 'ɯ', 'f' -> 'ɸ', 'g' -> 'ɡ'
+        ipa_raw = ipa_raw.replace("u", "ɯ").replace("f", "ɸ").replace("g", "ɡ")
 
         # Strictly filter against Kokoro's DEFAULT_VOCAB
         valid_ipa = "".join(p for p in ipa_raw if p in self.vocab)
