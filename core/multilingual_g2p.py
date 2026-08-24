@@ -121,7 +121,7 @@ _IPA_SUBSTITUTIONS = {
     "e̞": "e",
     "a̠": "a",
     "ɯᵝ": "ɯ",
-    "ɡ": "g",
+    "g": "ɡ",  # Ensure ASCII 'g' is mapped to Kokoro token 92 ('ɡ')
     "\u031e": "",  # Down tack diacritic
     "\u0320": "",  # Minus sign below
     "\u0308": "",  # Combining diaeresis
@@ -306,17 +306,25 @@ class MultilingualG2P:
     def normalize_text(text: str) -> str:
         """
         Normalize input text safely while preserving all international diacritics,
-        accents, and Asian/Devanagari scripts.
+        accents (â, é, è, ê, à, ç, etc.), French contractions (l', d', qu', c', j'),
+        and Asian/Devanagari scripts.
         """
         if not text:
             return ""
 
-        # Normalize unicode to NFC form (composed characters)
+        # Normalize unicode to NFC form (composed characters so â, é, è are single unified codepoints)
         normalized = unicodedata.normalize("NFC", text)
 
-        # Standardize smart quotes, hyphens, and whitespace
-        normalized = normalized.replace("“", '"').replace("”", '"').replace("’", "'").replace("‘", "'")
-        normalized = normalized.replace("—", " - ").replace("–", " - ")
+        # Standardize all apostrophe variants to ASCII single quote (') for perfect French/English elision
+        normalized = re.sub(r"[’‘ʼ`´ʹꞌ\u2019\u2018\u02bc]", "'", normalized)
+
+        # Standardize smart quotes and guillemets (« » “ ”)
+        normalized = re.sub(r"[“”«»\u201c\u201d\u00ab\u00bb]", '"', normalized)
+
+        # Standardize dashes and hyphens
+        normalized = normalized.replace("—", " - ").replace("–", " - ").replace("−", "-")
+
+        # Standardize whitespace while preserving punctuation
         normalized = re.sub(r"[\r\t\f\v]+", " ", normalized)
         normalized = re.sub(r" +", " ", normalized)
 
@@ -551,25 +559,22 @@ class MultilingualG2P:
             ja_ipa = self.japanese_text_to_kokoro_ipa(clean_text)
             return ja_ipa, "ja"
 
-        # Other languages: Use language-specific eSpeak-NG backend
+        # Other languages: Use Kokoro tokenizer phonemize or language-specific backend
         try:
-            raw_phonemes = phonemizer.phonemize(
-                clean_text,
-                language=resolved_lang,
-                backend="espeak",
-                preserve_punctuation=True,
-                with_stress=True,
-            )
+            raw_phonemes = self.tokenizer.phonemize(clean_text, lang=resolved_lang)
         except Exception as e:
-            logger.warning(f"Phonemization failed for lang '{resolved_lang}': {e}. Falling back to '{default_lang}'")
-            resolved_lang = default_lang
-            raw_phonemes = phonemizer.phonemize(
-                clean_text,
-                language=default_lang,
-                backend="espeak",
-                preserve_punctuation=True,
-                with_stress=True,
-            )
+            try:
+                raw_phonemes = phonemizer.phonemize(
+                    clean_text,
+                    language=resolved_lang,
+                    backend="espeak",
+                    preserve_punctuation=True,
+                    with_stress=True,
+                )
+            except Exception as err2:
+                logger.warning(f"Phonemization failed for lang '{resolved_lang}': {err2}. Falling back to '{default_lang}'")
+                resolved_lang = default_lang
+                raw_phonemes = self.tokenizer.phonemize(clean_text, lang=default_lang)
 
         harmonized = self.harmonize_ipa_for_kokoro(raw_phonemes, lang=resolved_lang)
         return harmonized, resolved_lang

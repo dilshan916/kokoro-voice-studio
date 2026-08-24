@@ -75,6 +75,54 @@ def generate_srt_from_segments(segments: List[Dict[str, Any]]) -> str:
         counter += 1
     return "\n".join(srt_blocks).strip() + "\n"
 
+
+def apply_boundary_fades(
+    samples: np.ndarray,
+    fade_ms: float = 8.0,
+    sample_rate: int = 24000,
+) -> np.ndarray:
+    """
+    Apply short linear fade-in and fade-out at audio boundaries (5ms - 10ms)
+    to eliminate DC offset clicks, pops, and sudden discontinuities when concatenating
+    audio chunks and silence arrays.
+    """
+    if samples is None or len(samples) == 0:
+        return samples
+    fade_len = int((fade_ms / 1000.0) * sample_rate)
+    fade_len = min(fade_len, len(samples) // 2)
+    if fade_len <= 1:
+        return samples
+
+    samples = samples.copy().astype(np.float32)
+    fade_in = np.linspace(0.0, 1.0, fade_len, dtype=np.float32)
+    fade_out = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)
+
+    samples[:fade_len] *= fade_in
+    samples[-fade_len:] *= fade_out
+    return samples
+
+
+def parse_pause_tag_duration(tag_match_or_str: str) -> float:
+    """
+    Parse pause tag duration supporting varied formats:
+    - [pause 0.5s], [pause 0.5], [pause: 500ms], [break 1.2s], <break time="500ms"/>
+    Returns duration in seconds (clamped between 0.02s and 30.0s).
+    """
+    if not tag_match_or_str:
+        return 0.0
+    text = str(tag_match_or_str).strip()
+    match = re.search(r"([0-9.]+)\s*(s|ms)?", text, re.IGNORECASE)
+    if not match:
+        return 0.35
+    val = float(match.group(1))
+    unit = (match.group(2) or "").lower()
+    if unit == "ms" or (not unit and val >= 20.0):
+        duration = val / 1000.0
+    else:
+        duration = val
+    return max(0.02, min(30.0, duration))
+
+
 # Complete 54+ Voice International Catalog (Official Kokoro ONNX + Curated Presets)
 VOICE_CATALOG: Dict[str, Dict[str, str]] = {
     # ------------------ 🇺🇸 American English (en-us - 20 Voices) ------------------
@@ -514,8 +562,11 @@ class KokoroStudioEngine:
         else:
             resolved_lang = target_lang
 
-        # Pause splitting
-        pause_pattern = re.compile(r"\[pause\s+([0-9.]+)\s*s?\]", re.IGNORECASE)
+        # Robust multi-format pause tag pattern
+        pause_pattern = re.compile(
+            r"(\[(?:pause|break)(?:\s+|:\s*)[0-9.]+\s*(?:s|ms)?\]|<break\s+time=[\"'][0-9.]+\s*(?:s|ms)?[\"']\s*/>)",
+            re.IGNORECASE,
+        )
         segments = pause_pattern.split(clean_text)
 
         if len(segments) > 1:
@@ -524,19 +575,23 @@ class KokoroStudioEngine:
                 chunk_text = segments[idx].strip()
                 if chunk_text:
                     if progress_callback:
-                        progress_callback(0.2 + (0.6 * (idx / len(segments))), f"Synthesizing section...")
+                        progress_callback(0.2 + (0.6 * (idx / len(segments))), "Synthesizing section...")
 
-                    # Multilingual G2P phonemize
+                    # Multilingual G2P phonemize (preserves mid-phrase flow and prosody)
                     phonemes, chunk_lang = self.g2p.phonemize(chunk_text, lang=resolved_lang, default_lang=voice_lang)
                     if phonemes:
                         samples, sr = self._kokoro.create(phonemes, voice=voice_style, speed=speed, is_phonemes=True)
+                        # Apply 8ms linear fade-in/fade-out to eliminate click/pop boundary artifacts
+                        samples = apply_boundary_fades(samples, fade_ms=8.0, sample_rate=self.sample_rate)
                         combined_samples.append(samples)
 
                 if idx + 1 < len(segments):
                     try:
-                        pause_sec = float(segments[idx + 1])
+                        tag_str = segments[idx + 1]
+                        pause_sec = parse_pause_tag_duration(tag_str)
                         silence_len = int(pause_sec * self.sample_rate)
-                        combined_samples.append(np.zeros(silence_len, dtype=np.float32))
+                        if silence_len > 0:
+                            combined_samples.append(np.zeros(silence_len, dtype=np.float32))
                     except Exception:
                         pass
 
@@ -551,6 +606,7 @@ class KokoroStudioEngine:
             phonemes, _ = self.g2p.phonemize(clean_text, lang=resolved_lang, default_lang=voice_lang)
             if phonemes:
                 final_samples, _ = self._kokoro.create(phonemes, voice=voice_style, speed=speed, is_phonemes=True)
+                final_samples = apply_boundary_fades(final_samples, fade_ms=8.0, sample_rate=self.sample_rate)
             else:
                 final_samples = np.array([], dtype=np.float32)
 
@@ -605,12 +661,13 @@ class KokoroStudioEngine:
                     continue
 
                 # Check for pause tag
-                pause_match = re.match(r"\[pause\s+([0-9.]+)\s*s?\]", line_content, re.IGNORECASE)
+                pause_match = re.search(r"(\[(?:pause|break)(?:\s+|:\s*)[0-9.]+\s*(?:s|ms)?\]|<break\s+time=[\"'][0-9.]+\s*(?:s|ms)?[\"']\s*/>)", line_content, re.IGNORECASE)
                 if pause_match:
-                    p_sec = float(pause_match.group(1))
+                    p_sec = parse_pause_tag_duration(pause_match.group(1))
                     current_time += p_sec
                     p_len = int(p_sec * self.sample_rate)
-                    combined_samples.append(np.zeros(p_len, dtype=np.float32))
+                    if p_len > 0:
+                        combined_samples.append(np.zeros(p_len, dtype=np.float32))
                     continue
 
                 if spk is not None:
@@ -636,6 +693,7 @@ class KokoroStudioEngine:
                 )
 
                 if len(line_samples) > 0:
+                    line_samples = apply_boundary_fades(line_samples, fade_ms=8.0, sample_rate=self.sample_rate)
                     dur = float(len(line_samples) / self.sample_rate)
                     seg_start = current_time
                     seg_end = current_time + dur
@@ -688,6 +746,7 @@ class KokoroStudioEngine:
             )
 
             if len(chunk_samples) > 0:
+                chunk_samples = apply_boundary_fades(chunk_samples, fade_ms=8.0, sample_rate=self.sample_rate)
                 dur = float(len(chunk_samples) / self.sample_rate)
                 seg_start = current_time
                 seg_end = current_time + dur
