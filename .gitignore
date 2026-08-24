@@ -27,3 +27,5 @@ build/
 *.spec
 .venv/
 venv/
+data/
+*.db

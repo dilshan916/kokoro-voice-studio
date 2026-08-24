@@ -82,6 +82,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # Import voice catalog and presets metadata (pure data structures, no heavy loading)
 from core.kokoro_engine import MASTERING_PRESETS, VOICE_CATALOG
 from core.multilingual_g2p import CANONICAL_LANG_MAP
+from core.billing_db import billing_db
 
 
 # ============================================================================
@@ -97,6 +98,23 @@ class RenderRequest(BaseModel):
     output_format: str = Field(default="wav", description="Audio output format ('wav' or 'mp3')")
     pause_punctuation_ms: int = Field(default=150, ge=0, le=1000, description="Pause duration after commas/colons in milliseconds")
     pause_paragraph_ms: int = Field(default=400, ge=0, le=2000, description="Pause duration between paragraphs/periods in milliseconds")
+    device_id: Optional[str] = Field(default=None, description="Client anonymous device ID for monthly quota tracking")
+
+
+class RedeemLicenseRequest(BaseModel):
+    device_id: str = Field(..., description="Anonymous client Device ID")
+    code: str = Field(..., description="Promo or VIP License code (e.g. KOKORO-VIP-FRIEND)")
+
+
+class CreateCheckoutRequest(BaseModel):
+    device_id: str = Field(..., description="Anonymous client Device ID")
+    return_url: Optional[str] = Field(default=None, description="Optional redirect URL after checkout")
+
+
+class GrantProRequest(BaseModel):
+    device_id: str = Field(..., description="Target Device ID")
+    tier: str = Field(default="pro", description="Target tier: 'free' or 'pro'")
+    note: str = Field(default="API Grant", description="Administrative note")
 
 
 class RenderResponse(BaseModel):
@@ -758,11 +776,41 @@ async def health_check():
 
 
 @app.post("/render", response_model=RenderResponse, summary="Synthesize Text to Mastered Audio")
-async def render_audio(req: RenderRequest, request: Request):
+async def render_audio(req: RenderRequest, request: Request, response: Response):
     """
     Synthesize input text into speech with selected voice, speed, language, and EQ mastering preset.
-    Returns the local file path, duration, file size, and direct streaming audio_url.
+    Enforces 20,000 characters/month for free-tier devices while granting unlimited access to Pro devices.
     """
+    # 1. Device identification & monthly quota enforcement
+    device_id = (
+        request.headers.get("x-device-id")
+        or request.headers.get("X-Device-Id")
+        or req.device_id
+        or "dev_anonymous"
+    )
+    text_len = len(req.text or "")
+
+    allowed, quota_info, quota_msg = billing_db.check_and_consume_quota(
+        device_id=device_id,
+        char_count=text_len,
+        voice_id=req.voice_id,
+    )
+
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "error": "quota_exceeded",
+                "message": quota_msg,
+                "quota": quota_info,
+            },
+        )
+
+    # Attach quota headers
+    response.headers["X-User-Tier"] = quota_info.get("tier", "free")
+    response.headers["X-Quota-Usage"] = str(quota_info.get("monthly_usage", 0))
+    response.headers["X-Quota-Remaining"] = str(quota_info.get("remaining_chars", "unlimited"))
+
     # Validate voice ID
     if req.voice_id not in VOICE_CATALOG:
         # Fallback to af_bella if unknown
@@ -774,7 +822,6 @@ async def render_audio(req: RenderRequest, request: Request):
         req.eq_preset = "Clean Studio (Default)"
 
     # Dispatch to background process with generous dynamic timeout (10-20 minutes for long scripts)
-    text_len = len(req.text or "")
     dynamic_timeout = max(600.0, float(text_len * 4.0))
     result = await engine_manager.render_async(req.model_dump(), timeout_sec=dynamic_timeout)
 
@@ -799,6 +846,119 @@ async def render_audio(req: RenderRequest, request: Request):
         srt_content=result.get("srt_content"),
         srt_filename=result.get("srt_filename"),
     )
+
+
+# ============================================================================
+# Quota, Promo Code & Billing Endpoints (Zero-Login Architecture)
+# ============================================================================
+
+@app.get("/v1/user/quota", summary="Get Device Character Quota & Subscription Status")
+async def get_user_quota(request: Request, device_id: Optional[str] = None):
+    """
+    Returns monthly character usage, limit, remaining characters, and tier (free/pro).
+    """
+    dev_id = (
+        device_id
+        or request.headers.get("x-device-id")
+        or request.headers.get("X-Device-Id")
+        or "dev_anonymous"
+    )
+    return billing_db.get_device_quota(dev_id)
+
+
+@app.post("/v1/user/redeem-license", summary="Redeem VIP Promo / License Code")
+async def redeem_license(req: RedeemLicenseRequest):
+    """
+    Redeems a Promo / VIP License code and upgrades device to lifetime Pro.
+    """
+    success, message, quota = billing_db.redeem_license_key(req.device_id, req.code)
+    if not success:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+    return {
+        "success": True,
+        "message": message,
+        "quota": quota,
+    }
+
+
+@app.post("/v1/billing/create-checkout-session", summary="Generate Stripe Checkout Link")
+async def create_checkout_session(req: CreateCheckoutRequest, request: Request):
+    """
+    Creates a Stripe Checkout Session for upgrading a device to Pro.
+    """
+    stripe_key = os.environ.get("STRIPE_SECRET_KEY")
+    price_id = os.environ.get("STRIPE_PRICE_ID")
+
+    base_url = str(request.base_url).rstrip("/")
+    return_url = req.return_url or f"{base_url}/billing/success?device_id={req.device_id}"
+
+    if stripe_key and price_id:
+        try:
+            import stripe
+            stripe.api_key = stripe_key
+            session = stripe.checkout.Session.create(
+                payment_method_types=["card"],
+                line_items=[{"price": price_id, "quantity": 1}],
+                mode="subscription",
+                success_url=return_url,
+                cancel_url=f"{base_url}/billing/cancel",
+                client_reference_id=req.device_id,
+                metadata={"device_id": req.device_id},
+            )
+            return {"checkout_url": session.url}
+        except Exception as e:
+            logger.error(f"Stripe session creation error: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+    # Demo / Test Checkout Fallback
+    return {
+        "checkout_url": f"https://dry-eldercare-bok.ngrok-free.dev/billing/mock-checkout?device_id={req.device_id}",
+        "message": "Stripe keys not set in environment. Use VIP codes (e.g. KOKORO-VIP-FRIEND) for instant activation.",
+    }
+
+
+@app.post("/v1/billing/webhook", summary="Stripe Webhook Receiver")
+async def stripe_webhook(request: Request):
+    """
+    Handles Stripe webhooks (checkout.session.completed, invoice.payment_succeeded).
+    """
+    try:
+        event = await request.json()
+        event_type = event.get("type")
+
+        if event_type in ("checkout.session.completed", "invoice.payment_succeeded"):
+            data_object = event.get("data", {}).get("object", {})
+            device_id = (
+                data_object.get("client_reference_id")
+                or data_object.get("metadata", {}).get("device_id")
+            )
+            if device_id:
+                billing_db.grant_pro(device_id, tier="pro", note=f"Stripe Webhook: {event_type}")
+                logger.info(f"Stripe Webhook successfully upgraded device '{device_id}' to PRO!")
+
+        return {"status": "received"}
+    except Exception as e:
+        logger.error(f"Webhook processing error: {e}")
+        return {"status": "error", "detail": str(e)}
+
+
+@app.post("/admin/grant-pro", summary="Admin API: Directly Grant Pro to Device ID")
+async def admin_grant_pro(req: GrantProRequest, request: Request):
+    """
+    Admin endpoint protected by X-Admin-Secret header to grant Pro to any device ID.
+    """
+    admin_secret = os.environ.get("ADMIN_SECRET_KEY", "kokoro_secret_admin_2026")
+    client_secret = request.headers.get("X-Admin-Secret") or request.headers.get("x-admin-secret")
+
+    if client_secret != admin_secret:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Admin Secret Key")
+
+    res = billing_db.grant_pro(req.device_id, tier=req.tier, note=req.note)
+    return {
+        "success": True,
+        "device_id": req.device_id,
+        "quota": res,
+    }
 
 
 @app.get("/audio/{filename}", summary="Stream or Download Rendered Audio File")
