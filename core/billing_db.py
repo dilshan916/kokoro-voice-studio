@@ -106,8 +106,16 @@ class BillingDB:
             if count == 0:
                 now = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 default_keys = [
-                    ("KOKORO-VIP-FRIEND", "pro", -1, "Unlimited VIP Master Key", now),
-                    ("BETA-PRO-2026", "pro", 100, "Beta Tester Key (100 uses)", now),
+                    ("KOKORO-VIP-LIFETIME", "pro", -1, "Unlimited Lifetime VIP Master Pass", now),
+                    ("STUDIO-PRO-UNLIMITED", "pro", -1, "Unlimited Lifetime Studio Pro Pass", now),
+                    ("INFINITY-VOICE-PASS", "pro", -1, "Unlimited Lifetime Infinity Pass", now),
+                    ("KOKORO-FOUNDER-ACCESS", "pro", -1, "Unlimited Lifetime Founder Pass", now),
+                    ("VIP-CREATOR-LIFETIME", "pro", -1, "Unlimited Lifetime Creator Pass", now),
+                    ("NEURAL-PRO-FOREVER", "pro", -1, "Unlimited Lifetime Neural Pro Pass", now),
+                    ("KOKORO-MASTER-2026", "pro", -1, "Unlimited Lifetime Master Pass 2026", now),
+                    ("ULTRA-VOICE-ACCESS", "pro", -1, "Unlimited Lifetime Ultra Voice Pass", now),
+                    ("VIP-SPECIAL-GIFT", "pro", -1, "Unlimited Lifetime VIP Gift Pass", now),
+                    ("ALPHA-LIFETIME-PASS", "pro", -1, "Unlimited Lifetime Alpha Pass", now),
                 ]
                 cursor.executemany(
                     "INSERT INTO license_keys (code, tier, max_uses, note, created_at) VALUES (?, ?, ?, ?, ?)",
