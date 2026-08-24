@@ -3,6 +3,7 @@ Kokoro Voice Studio Pro — Billing, Quota & Anonymous Device Management DB
 =========================================================================
 Persistent SQLite database handling:
   - Anonymous Device ID registry (zero-login)
+  - Anti-Uninstall / Anti-Reset protection via Hardware & Network Fingerprinting
   - 20,000 characters/month Free Tier enforcement (resets automatically each month)
   - Pro Plan (Unlimited) tier management
   - Promo / VIP License key generation & instant in-app redemption
@@ -56,6 +57,8 @@ class BillingDB:
                 """
                 CREATE TABLE IF NOT EXISTS devices (
                     device_id TEXT PRIMARY KEY,
+                    fingerprint TEXT,
+                    client_ip TEXT,
                     tier TEXT NOT NULL DEFAULT 'free',
                     monthly_usage INTEGER NOT NULL DEFAULT 0,
                     monthly_limit INTEGER NOT NULL DEFAULT 20000,
@@ -69,6 +72,14 @@ class BillingDB:
                 )
                 """
             )
+
+            # Check if fingerprint / client_ip columns exist in older DBs
+            cursor.execute("PRAGMA table_info(devices)")
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "fingerprint" not in columns:
+                cursor.execute("ALTER TABLE devices ADD COLUMN fingerprint TEXT")
+            if "client_ip" not in columns:
+                cursor.execute("ALTER TABLE devices ADD COLUMN client_ip TEXT")
 
             # 2. License / Promo Keys Table
             cursor.execute(
@@ -93,10 +104,17 @@ class BillingDB:
                     device_id TEXT NOT NULL,
                     char_count INTEGER NOT NULL,
                     voice_id TEXT,
+                    client_ip TEXT,
                     timestamp TEXT NOT NULL
                 )
                 """
             )
+
+            # Check if client_ip column exists in usage_logs in older DBs
+            cursor.execute("PRAGMA table_info(usage_logs)")
+            log_columns = [row["name"] for row in cursor.fetchall()]
+            if "client_ip" not in log_columns:
+                cursor.execute("ALTER TABLE usage_logs ADD COLUMN client_ip TEXT")
 
             conn.commit()
 
@@ -122,14 +140,21 @@ class BillingDB:
                     default_keys,
                 )
                 conn.commit()
-                logger.info("Initialized default VIP promo keys: KOKORO-VIP-FRIEND, BETA-PRO-2026")
 
-    def get_or_create_device(self, device_id: str) -> Dict[str, Any]:
-        """Fetch device record or create a fresh free-tier profile."""
+    def get_or_create_device(
+        self, device_id: str, fingerprint: str = "", client_ip: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Fetch device record or create a fresh profile.
+        Includes Anti-Reset protection: if app was uninstalled and reinstalled,
+        matches device fingerprint or client IP to retain existing spent characters and Pro status.
+        """
         if not device_id or not device_id.strip():
             device_id = "dev_anonymous"
 
         clean_id = device_id.strip()
+        clean_fp = fingerprint.strip() if fingerprint else ""
+        clean_ip = client_ip.strip() if client_ip else ""
         current_cycle = self._current_cycle_month()
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -138,42 +163,99 @@ class BillingDB:
             cursor.execute("SELECT * FROM devices WHERE device_id = ?", (clean_id,))
             row = cursor.fetchone()
 
-            if row is None:
-                # Create new device profile
-                cursor.execute(
-                    """
-                    INSERT INTO devices (
-                        device_id, tier, monthly_usage, monthly_limit,
-                        billing_cycle_month, created_at, updated_at
-                    ) VALUES (?, 'free', 0, ?, ?, ?, ?)
-                    """,
-                    (clean_id, DEFAULT_FREE_MONTHLY_LIMIT, current_cycle, now, now),
-                )
-                conn.commit()
-                cursor.execute("SELECT * FROM devices WHERE device_id = ?", (clean_id,))
-                row = cursor.fetchone()
-            else:
-                # Check for monthly cycle reset
+            if row is not None:
+                # Device already exists: update IP and fingerprint if changed
+                updates = ["updated_at = ?"]
+                params: List[Any] = [now]
+
+                if clean_fp and row["fingerprint"] != clean_fp:
+                    updates.append("fingerprint = ?")
+                    params.append(clean_fp)
+                if clean_ip and row["client_ip"] != clean_ip:
+                    updates.append("client_ip = ?")
+                    params.append(clean_ip)
+
+                # Monthly cycle reset check
                 if row["billing_cycle_month"] != current_cycle:
-                    cursor.execute(
-                        """
-                        UPDATE devices
-                        SET monthly_usage = 0,
-                            billing_cycle_month = ?,
-                            updated_at = ?
-                        WHERE device_id = ?
-                        """,
-                        (current_cycle, now, clean_id),
-                    )
-                    conn.commit()
-                    cursor.execute("SELECT * FROM devices WHERE device_id = ?", (clean_id,))
-                    row = cursor.fetchone()
+                    updates.append("monthly_usage = 0")
+                    updates.append("billing_cycle_month = ?")
+                    params.append(current_cycle)
 
-            return dict(row)
+                params.append(clean_id)
+                sql = f"UPDATE devices SET {', '.join(updates)} WHERE device_id = ?"
+                cursor.execute(sql, tuple(params))
+                conn.commit()
 
-    def get_device_quota(self, device_id: str) -> Dict[str, Any]:
+                cursor.execute("SELECT * FROM devices WHERE device_id = ?", (clean_id,))
+                return dict(cursor.fetchone())
+
+            # New device ID encountered: Check for Anti-Reset Fingerprint Match
+            inherited_tier = "free"
+            inherited_usage = 0
+            inherited_limit = DEFAULT_FREE_MONTHLY_LIMIT
+            inherited_key = None
+            note = None
+            prev_match = None
+
+            # 1. Match by persistent hardware fingerprint
+            if clean_fp:
+                cursor.execute(
+                    "SELECT * FROM devices WHERE fingerprint = ? AND billing_cycle_month = ? ORDER BY updated_at DESC LIMIT 1",
+                    (clean_fp, current_cycle),
+                )
+                prev_match = cursor.fetchone()
+                if prev_match:
+                    inherited_tier = prev_match["tier"]
+                    inherited_usage = prev_match["monthly_usage"]
+                    inherited_limit = prev_match["monthly_limit"]
+                    inherited_key = prev_match["license_key"]
+                    note = f"Linked via fingerprint to {prev_match['device_id']}"
+                    logger.info(f"Anti-Reset match by fingerprint: Device '{clean_id}' inherited {inherited_usage} chars usage / {inherited_tier} tier.")
+
+            # 2. Match by IP address if within current cycle
+            if not prev_match and clean_ip and clean_ip not in ("127.0.0.1", "localhost", ""):
+                cursor.execute(
+                    "SELECT * FROM devices WHERE client_ip = ? AND billing_cycle_month = ? AND monthly_usage > 0 ORDER BY updated_at DESC LIMIT 1",
+                    (clean_ip, current_cycle),
+                )
+                ip_match = cursor.fetchone()
+                if ip_match and ip_match["tier"] == "free":
+                    inherited_usage = ip_match["monthly_usage"]
+                    note = f"Linked via IP to {ip_match['device_id']}"
+                    logger.info(f"Anti-Reset match by IP: Device '{clean_id}' inherited {inherited_usage} chars usage.")
+
+            # Insert new device profile with preserved usage
+            cursor.execute(
+                """
+                INSERT INTO devices (
+                    device_id, fingerprint, client_ip, tier, monthly_usage, monthly_limit,
+                    billing_cycle_month, license_key, note, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    clean_id,
+                    clean_fp,
+                    clean_ip,
+                    inherited_tier,
+                    inherited_usage,
+                    inherited_limit,
+                    current_cycle,
+                    inherited_key,
+                    note,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+            cursor.execute("SELECT * FROM devices WHERE device_id = ?", (clean_id,))
+            return dict(cursor.fetchone())
+
+    def get_device_quota(
+        self, device_id: str, fingerprint: str = "", client_ip: str = ""
+    ) -> Dict[str, Any]:
         """Returns structured quota information for device."""
-        device = self.get_or_create_device(device_id)
+        device = self.get_or_create_device(device_id, fingerprint=fingerprint, client_ip=client_ip)
         tier = device.get("tier", "free")
         usage = device.get("monthly_usage", 0)
         limit = device.get("monthly_limit", DEFAULT_FREE_MONTHLY_LIMIT)
@@ -194,14 +276,19 @@ class BillingDB:
         }
 
     def check_and_consume_quota(
-        self, device_id: str, char_count: int, voice_id: str = ""
+        self,
+        device_id: str,
+        char_count: int,
+        voice_id: str = "",
+        fingerprint: str = "",
+        client_ip: str = "",
     ) -> Tuple[bool, Dict[str, Any], str]:
         """
         Validates whether device has sufficient quota for character length.
         If allowed, records consumption and returns (True, updated_quota, "ok").
         If quota exceeded on free tier, returns (False, quota_info, "quota_exceeded").
         """
-        device = self.get_or_create_device(device_id)
+        device = self.get_or_create_device(device_id, fingerprint=fingerprint, client_ip=client_ip)
         tier = device.get("tier", "free")
         usage = device.get("monthly_usage", 0)
         limit = device.get("monthly_limit", DEFAULT_FREE_MONTHLY_LIMIT)
@@ -216,18 +303,18 @@ class BillingDB:
                     (char_count, now, device["device_id"]),
                 )
                 cursor.execute(
-                    "INSERT INTO usage_logs (device_id, char_count, voice_id, timestamp) VALUES (?, ?, ?, ?)",
-                    (device["device_id"], char_count, voice_id, now),
+                    "INSERT INTO usage_logs (device_id, char_count, voice_id, client_ip, timestamp) VALUES (?, ?, ?, ?, ?)",
+                    (device["device_id"], char_count, voice_id, client_ip, now),
                 )
                 conn.commit()
-            return True, self.get_device_quota(device_id), "ok"
+            return True, self.get_device_quota(device_id, fingerprint, client_ip), "ok"
 
         # Free tier limit check
         if usage + char_count > limit:
             remaining = max(0, limit - usage)
             return (
                 False,
-                self.get_device_quota(device_id),
+                self.get_device_quota(device_id, fingerprint, client_ip),
                 f"Monthly free Cloud GPU quota exceeded ({usage:,} / {limit:,} chars used). Remaining: {remaining:,} chars. Upgrade to Pro for unlimited generation or switch to On-Device Offline Engine.",
             )
 
@@ -240,12 +327,12 @@ class BillingDB:
                 (char_count, now, device["device_id"]),
             )
             cursor.execute(
-                "INSERT INTO usage_logs (device_id, char_count, voice_id, timestamp) VALUES (?, ?, ?, ?)",
-                (device["device_id"], char_count, voice_id, now),
+                "INSERT INTO usage_logs (device_id, char_count, voice_id, client_ip, timestamp) VALUES (?, ?, ?, ?, ?)",
+                (device["device_id"], char_count, voice_id, client_ip, now),
             )
             conn.commit()
 
-        return True, self.get_device_quota(device_id), "ok"
+        return True, self.get_device_quota(device_id, fingerprint, client_ip), "ok"
 
     def redeem_license_key(self, device_id: str, code: str) -> Tuple[bool, str, Dict[str, Any]]:
         """
@@ -271,7 +358,7 @@ class BillingDB:
 
             # max_uses == -1 indicates unlimited uses
             if max_uses != -1 and used_count >= max_uses:
-                return False, "This promo code has reached its maximum usage limit.", {}
+                return False, "This license code has already been redeemed and cannot be reused.", {}
 
             # Increment used count
             cursor.execute("UPDATE license_keys SET used_count = used_count + 1 WHERE code = ?", (clean_code,))
@@ -293,6 +380,44 @@ class BillingDB:
 
         logger.info(f"Device '{clean_id}' successfully upgraded to PRO using code '{clean_code}'")
         return True, "🎉 License activated! You now have lifetime unlimited Kokoro Pro Cloud access.", self.get_device_quota(clean_id)
+
+    def generate_single_use_batch(
+        self, count: int = 10, prefix: str = "KOKORO-PRO", note: str = "1-Time Gift Code"
+    ) -> List[Dict[str, Any]]:
+        """
+        Generates a batch of unique, single-use license keys (max_uses = 1).
+        Each key can only be activated by one person/device.
+        """
+        import secrets
+
+        generated = []
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for _ in range(count):
+                part1 = secrets.token_hex(2).upper()
+                part2 = secrets.token_hex(2).upper()
+                code = f"{prefix}-{part1}-{part2}"
+                
+                cursor.execute(
+                    """
+                    INSERT INTO license_keys (code, tier, max_uses, used_count, note, created_at)
+                    VALUES (?, 'pro', 1, 0, ?, ?)
+                    """,
+                    (code, note, now),
+                )
+                generated.append({
+                    "code": code,
+                    "tier": "pro",
+                    "max_uses": 1,
+                    "used_count": 0,
+                    "note": note,
+                })
+            conn.commit()
+
+        logger.info(f"Generated batch of {count} single-use license codes with prefix '{prefix}'")
+        return generated
 
     def grant_pro(self, device_id: str, tier: str = "pro", note: str = "Admin manual grant") -> Dict[str, Any]:
         """Admin helper: Directly grants Pro status to any device ID."""

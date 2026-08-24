@@ -63,6 +63,12 @@ def main():
     check_parser = subparsers.add_parser("check", help="Check quota status for a Device ID")
     check_parser.add_argument("device_id", help="Target Device ID")
 
+    # 7. Generate Batch of Single-Use 1-Time Gift Keys
+    batch_parser = subparsers.add_parser("generate-batch", help="Generate a batch of 1-time single-use gift codes")
+    batch_parser.add_argument("--count", type=int, default=10, help="Number of 1-time codes to generate")
+    batch_parser.add_argument("--prefix", default="KOKORO-PRO", help="Code prefix")
+    batch_parser.add_argument("--note", default="1-Time Single-Use Gift Pass", help="Note / description")
+
     args = parser.parse_args()
 
     if args.command == "grant":
@@ -107,6 +113,16 @@ def main():
         for k, v in res.items():
             print(f"  - {k}: {v}")
         print()
+
+    elif args.command == "generate-batch":
+        keys = billing_db.generate_single_use_batch(count=args.count, prefix=args.prefix, note=args.note)
+        print(f"\n{'='*65}")
+        print(f" GENERATED {len(keys)} SINGLE-USE 1-TIME CODES (Max 1 Use Each)")
+        print(f"{'='*65}")
+        for i, k in enumerate(keys, 1):
+            print(f" {i:02d}. {k['code']}")
+        print(f"{'='*65}")
+        print(f"Each code can only be activated by ONE person/device.\n")
 
 if __name__ == "__main__":
     main()
