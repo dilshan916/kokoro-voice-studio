@@ -110,11 +110,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-              className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white flex items-center justify-center transition-all cursor-pointer shadow-sm relative"
+              className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-colors cursor-pointer shadow-sm relative border border-slate-200/60 dark:border-slate-700/60"
               title="Menu"
               aria-label="Toggle menu"
             >
-              <Menu className="w-4 h-4 text-white" />
+              <Menu className="w-4 h-4 text-slate-700 dark:text-slate-200" />
               {/* Online Status Dot */}
               <span
                 className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${
