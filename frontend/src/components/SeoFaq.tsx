@@ -54,6 +54,7 @@ export const SeoFaq: React.FC = React.memo(() => {
             >
               <button
                 onClick={() => setOpenIndex(isOpen ? null : idx)}
+                aria-expanded={isOpen}
                 className="w-full p-4 sm:p-5 text-left flex items-center justify-between gap-4 cursor-pointer"
               >
                 <span className="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-200">

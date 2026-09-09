@@ -32,10 +32,10 @@ export const GenerationCanvas: React.FC<GenerationCanvasProps> = React.memo(({
         {/* Dedicated Visible Text Input Box */}
         <div className="relative bg-slate-50/90 dark:bg-slate-900/80 border-2 border-slate-200/90 dark:border-slate-700 rounded-2xl p-4 sm:p-5 transition-all focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/15 focus-within:bg-white dark:focus-within:bg-slate-900 shadow-inner mb-4">
           <div className="flex items-center justify-between text-xs text-slate-400 dark:text-slate-500 mb-2.5">
-            <div className="flex items-center gap-2 font-semibold text-slate-600 dark:text-slate-300">
+            <label htmlFor="speech-script-input" className="flex items-center gap-2 font-semibold text-slate-600 dark:text-slate-300 cursor-pointer">
               <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <span>Type or paste your text below:</span>
-            </div>
+            </label>
 
             <div
               className={`font-mono text-xs font-semibold px-2.5 py-0.5 rounded-full ${
@@ -49,6 +49,8 @@ export const GenerationCanvas: React.FC<GenerationCanvasProps> = React.memo(({
           </div>
 
           <textarea
+            id="speech-script-input"
+            aria-label="Text script for AI speech generation"
             value={text}
             onChange={(e) => onChangeText(e.target.value)}
             placeholder="Type or paste your script here to generate speech..."
@@ -59,7 +61,7 @@ export const GenerationCanvas: React.FC<GenerationCanvasProps> = React.memo(({
 
         {/* Sample Prompt Chips */}
         <div className="flex flex-wrap items-center gap-1.5 pt-4 pb-6 border-t border-slate-100 dark:border-slate-700/60">
-          <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 flex items-center gap-1 mr-1">
+          <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1 mr-1">
             <Sparkles className="w-3 h-3 text-blue-500" />
             Try:
           </span>

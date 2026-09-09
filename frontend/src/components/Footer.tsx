@@ -208,7 +208,7 @@ export const Footer: React.FC<FooterProps> = React.memo(({
       </div>
 
       {/* Bottom Copyright */}
-      <div className="max-w-6xl mx-auto pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-400 dark:text-slate-500">
+      <div className="max-w-6xl mx-auto pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-600 dark:text-slate-400">
         <div>
           &copy; {new Date().getFullYear()} {LEGAL_CONFIG.serviceName}. All rights reserved.
         </div>

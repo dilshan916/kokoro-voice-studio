@@ -32,9 +32,9 @@ export const ControlCards: React.FC<ControlCardsProps> = React.memo(({
             <User className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
               Select Voice
-            </h3>
+            </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               Choose from a variety of realistic voices
             </p>
@@ -58,7 +58,7 @@ export const ControlCards: React.FC<ControlCardsProps> = React.memo(({
                 <span className="font-bold text-sm sm:text-base text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                   {selectedVoice.name}
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-mono font-medium">
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-300 font-mono font-medium">
                   {selectedVoice.id}
                 </span>
               </div>
@@ -86,9 +86,9 @@ export const ControlCards: React.FC<ControlCardsProps> = React.memo(({
             <Sliders className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
               Audio Options
-            </h3>
+            </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               Adjust the speed and acoustic mastering
             </p>
@@ -100,15 +100,17 @@ export const ControlCards: React.FC<ControlCardsProps> = React.memo(({
           {/* Speed Slider Control */}
           <div className="bg-slate-50/80 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-3 flex flex-col justify-between">
             <div className="flex items-center justify-between text-xs font-medium text-slate-700 dark:text-slate-300 mb-2">
-              <span className="flex items-center gap-1.5">
+              <label htmlFor="speech-speed-slider" className="flex items-center gap-1.5 cursor-pointer">
                 <Gauge className="w-3.5 h-3.5 text-blue-500" />
                 Speed
-              </span>
-              <span className="font-mono text-blue-600 dark:text-blue-400 font-bold bg-blue-500/10 px-1.5 py-0.5 rounded">
+              </label>
+              <span className="font-mono text-blue-700 dark:text-blue-300 font-bold bg-blue-500/10 px-1.5 py-0.5 rounded">
                 {speed.toFixed(1)}x
               </span>
             </div>
             <input
+              id="speech-speed-slider"
+              aria-label="Speech Speed Multiplier"
               type="range"
               min={0.5}
               max={2.0}
@@ -122,12 +124,14 @@ export const ControlCards: React.FC<ControlCardsProps> = React.memo(({
           {/* Mastering EQ Preset Selector */}
           <div className="bg-slate-50/80 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl p-3 flex flex-col justify-between">
             <div className="flex items-center justify-between text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-              <span className="flex items-center gap-1.5">
+              <label htmlFor="mastering-eq-select" className="flex items-center gap-1.5 cursor-pointer">
                 <AudioWaveform className="w-3.5 h-3.5 text-blue-500" />
                 Mastering EQ
-              </span>
+              </label>
             </div>
             <select
+              id="mastering-eq-select"
+              aria-label="Acoustic Mastering Equalizer Preset"
               value={selectedPreset}
               onChange={(e) => onChangePreset(e.target.value)}
               className="w-full bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:border-blue-500 cursor-pointer"
