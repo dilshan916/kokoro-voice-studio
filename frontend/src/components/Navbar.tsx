@@ -8,7 +8,6 @@ interface NavbarProps {
   onOpenVoices: () => void;
   onOpenPricing: () => void;
   onOpenDevelopers: () => void;
-  onOpenServer: () => void;
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
 }
@@ -19,7 +18,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenVoices,
   onOpenPricing,
   onOpenDevelopers,
-  onOpenServer,
   isDarkMode,
   onToggleDarkMode,
 }) => {
@@ -173,28 +171,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </span>
                 </button>
 
-                {/* Server Status & Settings */}
-                <button
-                  onClick={() => {
-                    setIsUserMenuOpen(false);
-                    onOpenServer();
-                  }}
-                  className="w-full p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700/60 text-left flex items-center justify-between text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
-                >
+                {/* Server Status Display */}
+                <div className="w-full p-2.5 rounded-xl flex items-center justify-between text-slate-700 dark:text-slate-200">
                   <span className="flex items-center gap-2">
                     <Server className="w-3.5 h-3.5 text-blue-500" />
                     Server Connection
                   </span>
                   <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
+                    className={`text-[10px] px-2 py-0.5 rounded-md font-semibold flex items-center gap-1.5 ${
                       isOnline
                         ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                         : 'bg-rose-500/10 text-rose-500'
                     }`}
                   >
+                    <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
                     {isOnline ? 'Online' : 'Offline'}
                   </span>
-                </button>
+                </div>
 
                 {/* Mobile App Download */}
                 <a

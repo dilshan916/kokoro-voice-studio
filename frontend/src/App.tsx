@@ -7,7 +7,6 @@ import { TrustBadges } from './components/TrustBadges';
 import { LastRegenerations } from './components/LastRegenerations';
 import { VoiceModal } from './components/VoiceModal';
 import { PricingModal } from './components/PricingModal';
-import { ServerModal } from './components/ServerModal';
 import { DeveloperModal } from './components/DeveloperModal';
 import { SeoFeatures } from './components/SeoFeatures';
 import { SeoFaq } from './components/SeoFaq';
@@ -107,7 +106,6 @@ export const App: React.FC = () => {
   // Modals
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
   const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
-  const [isServerModalOpen, setIsServerModalOpen] = useState(false);
   const [isDeveloperModalOpen, setIsDeveloperModalOpen] = useState(false);
   const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
 
@@ -388,7 +386,6 @@ export const App: React.FC = () => {
         onOpenVoices={() => setIsVoiceModalOpen(true)}
         onOpenPricing={() => setIsPricingModalOpen(true)}
         onOpenDevelopers={() => setIsDeveloperModalOpen(true)}
-        onOpenServer={() => setIsServerModalOpen(true)}
         isDarkMode={isDarkMode}
         onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
       />
@@ -499,12 +496,6 @@ export const App: React.FC = () => {
         onClose={() => setIsPricingModalOpen(false)}
         quota={quota}
         onQuotaUpdated={refreshData}
-      />
-
-      <ServerModal
-        isOpen={isServerModalOpen}
-        onClose={() => setIsServerModalOpen(false)}
-        onServerChanged={refreshData}
       />
 
       <DeveloperModal
