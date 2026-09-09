@@ -1,39 +1,89 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Navbar } from './components/Navbar';
-import { VoiceCatalog } from './components/VoiceCatalog';
-import { EditorWorkspace } from './components/EditorWorkspace';
-import { MasterInspector } from './components/MasterInspector';
-import { AudioPlayerBar } from './components/AudioPlayerBar';
+import { HeroSection } from './components/HeroSection';
+import { ControlCards } from './components/ControlCards';
+import { GenerationCanvas } from './components/GenerationCanvas';
+import { TrustBadges } from './components/TrustBadges';
+import { LastRegenerations } from './components/LastRegenerations';
+import { VoiceModal } from './components/VoiceModal';
+import { PricingModal } from './components/PricingModal';
+import { ServerModal } from './components/ServerModal';
+import { DeveloperModal } from './components/DeveloperModal';
+import { SeoFeatures } from './components/SeoFeatures';
+import { SeoFaq } from './components/SeoFaq';
+import { Footer } from './components/Footer';
+import { LegalModal } from './components/LegalModal';
+import { LegalCenter } from './components/LegalCenter';
+import { LegalDocId, ALL_LEGAL_DOCS } from './legal/legalContent';
 import { kokoroApi } from './api/kokoroApi';
-import { Voice, HealthData, AudioTrack } from './types';
+import { Voice, HealthData, UserQuota, GenerationHistoryItem } from './types';
 
-// Fallback initial voice list if server is initializing
 const DEFAULT_INITIAL_VOICES: Voice[] = [
   { id: 'af_bella', name: 'Bella', gender: 'Female', lang: 'en-us', lang_name: 'English (US)', flag: '🇺🇸', description: 'Warm, expressive, high-retention narration' },
-  { id: 'am_adam', name: 'Adam', gender: 'Male', lang: 'en-us', lang_name: 'English (US)', flag: '🇺🇸', description: 'Deep, authoritative, podcast host style' },
+  { id: 'am_adam', name: 'Adam', gender: 'Male', lang: 'en-us', lang_name: 'English (US)', flag: '🇺🇸', description: 'Deep, authoritative podcast host' },
   { id: 'ff_camille', name: 'Camille', gender: 'Female', lang: 'fr-fr', lang_name: 'French', flag: '🇫🇷', description: 'Graceful, conversational Parisian French' },
   { id: 'jf_alpha', name: 'Alpha', gender: 'Female', lang: 'ja', lang_name: 'Japanese', flag: '🇯🇵', description: 'Natural, bright Japanese female voice' },
-  { id: 'kf_minji', name: 'Minji', gender: 'Female', lang: 'ko', lang_name: 'Korean', flag: '🇰🇷', description: 'Melodic, warm Seoul dialect female narrator' },
-  { id: 'zf_xiaoxiao', name: 'Xiaoxiao', gender: 'Female', lang: 'cmn', lang_name: 'Mandarin', flag: '🇨🇳', description: 'Clear standard Mandarin broadcast presenter' },
+  { id: 'kf_minji', name: 'Minji', gender: 'Female', lang: 'ko', lang_name: 'Korean', flag: '🇰🇷', description: 'Melodic, warm Korean narrator' },
+  { id: 'zf_xiaoxiao', name: 'Xiaoxiao', gender: 'Female', lang: 'cmn', lang_name: 'Mandarin', flag: '🇨🇳', description: 'Standard Mandarin broadcast presenter' },
   { id: 'ef_dora', name: 'Dora', gender: 'Female', lang: 'es', lang_name: 'Spanish', flag: '🇪🇸', description: 'Warm, expressive Spanish narrator' },
-  { id: 'hf_alpha', name: 'Alpha (अल्फा)', gender: 'Female', lang: 'hi', lang_name: 'Hindi', flag: '🇮🇳', description: 'Clear, expressive Hindi female narrator' },
-  { id: 'if_sara', name: 'Sara', gender: 'Female', lang: 'it', lang_name: 'Italian', flag: '🇮🇹', description: 'Lively, melodic, authentic Italian voice' },
-  { id: 'pf_dora', name: 'Dora (BR)', gender: 'Female', lang: 'pt-br', lang_name: 'Portuguese (BR)', flag: '🇧🇷', description: 'Natural, warm Brazilian Portuguese voice' },
+  { id: 'hf_alpha', name: 'Alpha', gender: 'Female', lang: 'hi', lang_name: 'Hindi', flag: '🇮🇳', description: 'Clear, expressive Hindi female narrator' },
+  { id: 'if_sara', name: 'Sara', gender: 'Female', lang: 'it', lang_name: 'Italian', flag: '🇮🇹', description: 'Lively, melodic Italian voice' },
+  { id: 'pf_dora', name: 'Dora (BR)', gender: 'Female', lang: 'pt-br', lang_name: 'Portuguese (BR)', flag: '🇧🇷', description: 'Natural Brazilian Portuguese voice' },
 ];
 
+function parseLegalRoute(): { isLegal: boolean; docId: LegalDocId } {
+  if (typeof window === 'undefined') return { isLegal: false, docId: 'privacy' };
+
+  const pathname = window.location.pathname.toLowerCase();
+  const hash = window.location.hash.toLowerCase();
+
+  // Match /legal, /legal/privacy, /legal/terms, etc.
+  if (pathname.startsWith('/legal')) {
+    const sub = pathname.replace(/^\/legal\/?/, '').split('/')[0];
+    const match = ALL_LEGAL_DOCS.find((d) => d.id === sub);
+    return { isLegal: true, docId: match ? match.id : 'privacy' };
+  }
+
+  // Match #/legal/..., #legal/...
+  if (hash.startsWith('#/legal') || hash.startsWith('#legal')) {
+    const sub = hash.replace(/^#\/?legal\/?/, '').split('/')[0];
+    const match = ALL_LEGAL_DOCS.find((d) => d.id === sub);
+    return { isLegal: true, docId: match ? match.id : 'privacy' };
+  }
+
+  // Match direct hash: #privacy, #terms, etc.
+  const directHash = hash.replace(/^#\/?/, '');
+  const directMatch = ALL_LEGAL_DOCS.find((d) => d.id === directHash);
+  if (directMatch) {
+    return { isLegal: true, docId: directMatch.id };
+  }
+
+  return { isLegal: false, docId: 'privacy' };
+}
+
 export const App: React.FC = () => {
-  // Backend health & system metadata
+  // Theme State
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('kokoro_theme');
+      return saved === 'dark';
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('kokoro_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('kokoro_theme', 'light');
+    }
+  }, [isDarkMode]);
+
+  // Backend Health & Metadata
   const [health, setHealth] = useState<HealthData | null>(null);
-  const [isCheckingHealth, setIsCheckingHealth] = useState(true);
-
-  // Editor states
-  const [text, setText] = useState(
-    'Welcome to Kokoro Studio! Generate natural, expressive speech across 60 neural voices in English, French, Japanese, Korean, Mandarin, Spanish, Hindi, Italian, and Portuguese.'
-  );
-  const [selectedVoice, setSelectedVoice] = useState<Voice>(DEFAULT_INITIAL_VOICES[0]);
-
-  // Audio Inspector (Slide-over drawer)
-  const [isInspectorOpen, setIsInspectorOpen] = useState<boolean>(false);
+  const [quota, setQuota] = useState<UserQuota | null>(null);
   const [presets, setPresets] = useState<string[]>([
     'Clean Studio (Default)',
     'Warm Podcast Host (+Bass)',
@@ -42,175 +92,432 @@ export const App: React.FC = () => {
     'Crisp Air (Commercial)',
     'Vintage Tube Warmth',
     'Bassy Narration',
-    'Flat / Raw (Unprocessed)',
+    'Raw Unprocessed',
   ]);
-  const [selectedPreset, setSelectedPreset] = useState<string>('Clean Studio (Default)');
+
+  // Studio Settings
+  const [text, setText] = useState('Welcome to Kokoro Studio! Create natural-sounding audio with our advanced AI voices.');
+  const [selectedVoice, setSelectedVoice] = useState<Voice>(DEFAULT_INITIAL_VOICES[0]);
   const [speed, setSpeed] = useState<number>(1.0);
-  const [outputFormat, setOutputFormat] = useState<'wav' | 'mp3'>('wav');
-  const [pausePunctuationMs, setPausePunctuationMs] = useState<number>(150);
-  const [pauseParagraphMs, setPauseParagraphMs] = useState<number>(400);
-
-  // Rendering & Playback state
+  const [selectedPreset, setSelectedPreset] = useState<string>('Clean Studio (Default)');
   const [isRendering, setIsRendering] = useState<boolean>(false);
-  const [currentTrack, setCurrentTrack] = useState<AudioTrack | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [paymentNotice, setPaymentNotice] = useState<{ type: 'success' | 'cancelled'; message: string } | null>(null);
 
-  // Poll backend health
-  const fetchHealth = useCallback(async () => {
-    try {
-      setIsCheckingHealth(true);
-      const data = await kokoroApi.getHealth();
-      setHealth(data);
-      if (data.mastering_presets && data.mastering_presets.length > 0) {
-        setPresets(data.mastering_presets);
+  // Modals
+  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
+  const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
+  const [isServerModalOpen, setIsServerModalOpen] = useState(false);
+  const [isDeveloperModalOpen, setIsDeveloperModalOpen] = useState(false);
+  const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
+
+  // View Routing State (Studio vs Dedicated Legal Center)
+  const [currentView, setCurrentView] = useState<'studio' | 'legal'>(() => {
+    return parseLegalRoute().isLegal ? 'legal' : 'studio';
+  });
+  const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocId>(() => {
+    return parseLegalRoute().docId;
+  });
+
+  // Handle browser back/forward (popstate)
+  useEffect(() => {
+    const handlePopState = () => {
+      const route = parseLegalRoute();
+      if (route.isLegal) {
+        setCurrentView('legal');
+        setActiveLegalDoc(route.docId);
+      } else {
+        setCurrentView('studio');
       }
-      setErrorMessage(null);
-    } catch (err: any) {
-      console.warn('FastAPI backend health check failed:', err.message);
-      setHealth(null);
-    } finally {
-      setIsCheckingHealth(false);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigateToLegal = (docId: LegalDocId) => {
+    setActiveLegalDoc(docId);
+    setCurrentView('legal');
+    setIsLegalModalOpen(false);
+    if (typeof window !== 'undefined') {
+      window.history.pushState(null, '', `/legal/${docId}`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const navigateToStudio = () => {
+    setCurrentView('studio');
+    if (typeof window !== 'undefined') {
+      window.history.pushState(null, '', '/');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  // History & Playback
+  const [history, setHistory] = useState<GenerationHistoryItem[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('kokoro_history');
+        if (saved) return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed to parse history:', e);
+      }
+    }
+    return [];
+  });
+
+  const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [playbackProgress, setPlaybackProgress] = useState<number>(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Initialize Global Audio Element
+  useEffect(() => {
+    const audio = new Audio();
+    audioRef.current = audio;
+
+    audio.onended = () => {
+      setIsPlaying(false);
+      setPlaybackProgress(0);
+    };
+
+    audio.ontimeupdate = () => {
+      if (audio.duration) {
+        setPlaybackProgress(audio.currentTime / audio.duration);
+      }
+    };
+
+    audio.onerror = (e) => {
+      console.warn('Audio playback error:', e);
+      setIsPlaying(false);
+    };
+
+    return () => {
+      audio.pause();
+      audio.src = '';
+    };
+  }, []);
+
+  // Fetch backend health & quota
+  const refreshData = useCallback(async () => {
+    try {
+      const [healthData, quotaData] = await Promise.allSettled([
+        kokoroApi.getHealth(),
+        kokoroApi.getUserQuota(),
+      ]);
+
+      if (healthData.status === 'fulfilled') {
+        setHealth(healthData.value);
+        if (healthData.value.mastering_presets?.length) {
+          setPresets(healthData.value.mastering_presets);
+        }
+      } else {
+        setHealth(null);
+      }
+
+      if (quotaData.status === 'fulfilled') {
+        setQuota(quotaData.value);
+      }
+    } catch (err) {
+      console.warn('Failed to refresh data:', err);
     }
   }, []);
 
   useEffect(() => {
-    fetchHealth();
-    const interval = setInterval(fetchHealth, health?.status === 'ready' ? 15000 : 4000);
-    return () => clearInterval(interval);
-  }, [fetchHealth, health?.status]);
+    refreshData();
+    const timer = setInterval(refreshData, 20000);
+    return () => clearInterval(timer);
+  }, [refreshData]);
 
-  // Handler for synthesizing speech
-  const handleRenderSpeech = async (customText?: string) => {
-    const textToRender = (customText || text).trim();
-    if (!textToRender || isRendering) return;
+  // Check for Stripe Checkout return query params (?payment=success or ?payment=cancelled)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const paymentStatus = params.get('payment');
+      if (paymentStatus === 'success') {
+        setPaymentNotice({
+          type: 'success',
+          message: '🎉 Payment successful! Your device has been upgraded to PRO Unlimited.',
+        });
+        refreshData();
+        const cleanUrl = window.location.pathname + (window.location.hash || '');
+        window.history.replaceState(null, '', cleanUrl);
+      } else if (paymentStatus === 'cancelled') {
+        setPaymentNotice({
+          type: 'cancelled',
+          message: 'Checkout was cancelled. No charges were made.',
+        });
+        const cleanUrl = window.location.pathname + (window.location.hash || '');
+        window.history.replaceState(null, '', cleanUrl);
+      }
+    } catch (e) {
+      console.warn('Failed to parse URL payment params:', e);
+    }
+  }, [refreshData]);
+
+  // Audio Playback Controls
+  const playTrack = (item: GenerationHistoryItem) => {
+    if (!audioRef.current) return;
+    if (activeTrackId === item.id) {
+      audioRef.current.play().then(() => setIsPlaying(true)).catch(console.warn);
+      return;
+    }
+
+    setActiveTrackId(item.id);
+    audioRef.current.src = item.audio_url;
+    audioRef.current.play().then(() => setIsPlaying(true)).catch(console.warn);
+  };
+
+  const pauseTrack = () => {
+    if (!audioRef.current) return;
+    audioRef.current.pause();
+    setIsPlaying(false);
+  };
+
+  // Convert to Audio Handler
+  const handleConvert = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || isRendering) return;
 
     setIsRendering(true);
     setErrorMessage(null);
 
     try {
       const response = await kokoroApi.renderSpeech({
-        text: textToRender,
+        text: trimmed,
         voice_id: selectedVoice.id,
-        speed: speed,
+        speed,
         eq_preset: selectedPreset,
         lang: selectedVoice.lang || 'auto',
-        output_format: outputFormat,
-        pause_punctuation_ms: pausePunctuationMs,
-        pause_paragraph_ms: pauseParagraphMs,
+        output_format: 'mp3',
       });
 
-      // If audio_base64 is returned from server, create in-memory Blob URL (100% immune to IDM / download managers)
+      // Prepare audio URL (use Base64 blob if returned to avoid download managers)
       let playbackUrl = response.audio_url;
       if (response.audio_base64) {
         try {
           const binaryString = atob(response.audio_base64);
-          const len = binaryString.length;
-          const bytes = new Uint8Array(len);
-          for (let i = 0; i < len; i++) {
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
             bytes[i] = binaryString.charCodeAt(i);
           }
-          const mimeType = response.filename.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav';
-          const audioBlob = new Blob([bytes.buffer], { type: mimeType });
-          playbackUrl = URL.createObjectURL(audioBlob);
+          const blob = new Blob([bytes.buffer], { type: 'audio/mpeg' });
+          playbackUrl = URL.createObjectURL(blob);
         } catch (e) {
-          console.warn('Failed to parse base64 audio into blob:', e);
+          console.warn('Base64 decode error:', e);
         }
       }
 
-      // Update active playback track
-      const newTrack: AudioTrack = {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      const newItem: GenerationHistoryItem = {
         id: response.filename,
-        title: textToRender.length > 40 ? textToRender.substring(0, 37) + '...' : textToRender,
+        title: trimmed.length > 35 ? trimmed.substring(0, 32) + '...' : trimmed,
         voice_name: response.voice_name || selectedVoice.name,
         voice_flag: selectedVoice.flag,
         audio_url: playbackUrl,
-        duration: response.duration,
         filename: response.filename,
-        lang: response.lang_resolved,
-        eq_preset: response.eq_preset,
-        audio_base64: response.audio_base64,
+        duration: response.duration,
+        timestamp: Date.now(),
+        formatted_time: timeStr,
         srt_content: response.srt_content,
         srt_filename: response.srt_filename,
+        audio_base64: response.audio_base64,
       };
 
-      setCurrentTrack(newTrack);
+      const updatedHistory = [newItem, ...history.slice(0, 19)];
+      setHistory(updatedHistory);
+      try {
+        localStorage.setItem('kokoro_history', JSON.stringify(updatedHistory));
+      } catch (e) {}
+
+      // Auto-play the newly generated speech!
+      playTrack(newItem);
+
+      // Refresh quota
+      refreshData();
     } catch (err: any) {
-      const detail = err.response?.data?.detail || err.message || 'Failed to generate speech';
-      setErrorMessage(detail);
-      console.error('Render error:', err);
+      const detail = err.response?.data?.detail;
+      const msg = typeof detail === 'object' ? detail.message || JSON.stringify(detail) : detail || err.message || 'Speech generation failed';
+      setErrorMessage(msg);
     } finally {
       setIsRendering(false);
     }
   };
 
+  const handleClearHistory = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    setIsPlaying(false);
+    setActiveTrackId(null);
+    setHistory([]);
+    try {
+      localStorage.removeItem('kokoro_history');
+    } catch (e) {}
+  };
+
   const voices = health?.voices && health.voices.length > 0 ? health.voices : DEFAULT_INITIAL_VOICES;
 
+  // Render Dedicated Full Legal Center if in legal view
+  if (currentView === 'legal') {
+    return (
+      <LegalCenter
+        initialDocId={activeLegalDoc}
+        onSelectDoc={navigateToLegal}
+        onBackToStudio={navigateToStudio}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+      />
+    );
+  }
+
   return (
-    <div className="h-screen w-screen flex flex-col bg-studio-bg overflow-hidden text-gray-100 font-sans antialiased">
-      {/* 1. Top Clean Navbar */}
+    <div className="min-h-screen flex flex-col bg-gradient-to-b from-[#eaf3ff] via-[#e2edfc] to-[#d8e7fa] dark:from-[#0b0f19] dark:via-[#0e1322] dark:to-[#090d16] text-slate-900 dark:text-slate-100 font-sans transition-colors duration-200">
+      {/* 1. Clean Top Navbar */}
       <Navbar
         health={health}
-        isLoading={isCheckingHealth}
-        onRefreshHealth={fetchHealth}
-        onToggleInspector={() => setIsInspectorOpen(!isInspectorOpen)}
-        isInspectorOpen={isInspectorOpen}
+        quota={quota}
+        onOpenVoices={() => setIsVoiceModalOpen(true)}
+        onOpenPricing={() => setIsPricingModalOpen(true)}
+        onOpenDevelopers={() => setIsDeveloperModalOpen(true)}
+        onOpenServer={() => setIsServerModalOpen(true)}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
       />
 
-      {/* Error Alert Banner */}
-      {errorMessage && (
-        <div className="bg-rose-500/10 border-b border-rose-500/20 px-6 py-2 text-xs text-rose-300 flex items-center justify-between z-40">
-          <span>⚠️ {errorMessage}</span>
-          <button
-            onClick={() => setErrorMessage(null)}
-            className="text-white hover:text-rose-200 font-bold px-2"
+      {/* Payment Notice Banner */}
+      {paymentNotice && (
+        <div className="max-w-4xl mx-auto w-full px-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
+          <div
+            className={`p-3.5 rounded-2xl text-xs flex items-center justify-between shadow-sm ${
+              paymentNotice.type === 'success'
+                ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 shadow-emerald-500/10'
+                : 'bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300 shadow-amber-500/10'
+            }`}
           >
-            ✕
-          </button>
+            <div className="flex items-center gap-2 font-semibold">
+              <span>{paymentNotice.message}</span>
+            </div>
+            <button
+              onClick={() => setPaymentNotice(null)}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold px-2 py-0.5 rounded-lg cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
         </div>
       )}
 
-      {/* 2. Main 2-Column Clean Layout */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Column: Clean Voice Catalog */}
-        <VoiceCatalog
-          voices={voices}
-          selectedVoiceId={selectedVoice.id}
-          onSelectVoice={setSelectedVoice}
+      {/* Error Alert Banner */}
+      {errorMessage && (
+        <div className="max-w-4xl mx-auto w-full px-4 mt-4">
+          <div className="bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 p-3.5 rounded-2xl text-xs flex items-center justify-between shadow-sm">
+            <span>⚠️ {errorMessage}</span>
+            <button
+              onClick={() => setErrorMessage(null)}
+              className="text-rose-500 hover:text-rose-700 font-bold px-2 py-0.5 rounded-lg"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Main Studio Canvas Layout Matching Reference Image */}
+      <main className="flex-1 max-w-5xl mx-auto w-full px-4 sm:px-6 py-4 flex flex-col justify-start space-y-6">
+        {/* Hero Section */}
+        <HeroSection />
+
+        {/* 2 Control Cards: SELECT VOICE & AUDIO OPTIONS */}
+        <ControlCards
+          selectedVoice={selectedVoice}
+          onOpenVoiceModal={() => setIsVoiceModalOpen(true)}
+          speed={speed}
+          onChangeSpeed={setSpeed}
+          selectedPreset={selectedPreset}
+          onChangePreset={setSelectedPreset}
+          presets={presets}
         />
 
-        {/* Center Column: Spacious Editor Canvas */}
-        <EditorWorkspace
+        {/* Text Input & Centered Convert Button */}
+        <GenerationCanvas
           text={text}
           onChangeText={setText}
-          selectedVoice={selectedVoice}
-          voices={voices}
+          onConvert={handleConvert}
           isRendering={isRendering}
-          onRenderSpeech={handleRenderSpeech}
-          speed={speed}
-          onOpenSettings={() => setIsInspectorOpen(true)}
-          selectedPreset={selectedPreset}
+          maxChars={quota?.tier === 'pro' ? 20000 : 2000}
         />
-      </div>
 
-      {/* 3. Slide-over Audio Master Settings Drawer */}
-      <MasterInspector
-        isOpen={isInspectorOpen}
-        onClose={() => setIsInspectorOpen(false)}
-        selectedPreset={selectedPreset}
-        onSelectPreset={setSelectedPreset}
-        presets={presets}
-        speed={speed}
-        onChangeSpeed={setSpeed}
-        outputFormat={outputFormat}
-        onChangeOutputFormat={setOutputFormat}
-        pausePunctuationMs={pausePunctuationMs}
-        onChangePausePunctuationMs={setPausePunctuationMs}
-        pauseParagraphMs={pauseParagraphMs}
-        onChangePauseParagraphMs={setPauseParagraphMs}
+        {/* Trust Badges */}
+        <TrustBadges />
+
+        {/* 3. Crawlable SEO Features Grid */}
+        <SeoFeatures />
+
+        {/* 4. Interactive SEO FAQ Accordion */}
+        <SeoFaq />
+      </main>
+
+      {/* 5. Semantic SEO Footer */}
+      <Footer
+        onOpenVoices={() => setIsVoiceModalOpen(true)}
+        onOpenPricing={() => setIsPricingModalOpen(true)}
+        onOpenDevelopers={() => setIsDeveloperModalOpen(true)}
+        onOpenLegal={(docId) => navigateToLegal(docId)}
       />
 
-      {/* 4. Bottom Sticky Player Bar */}
-      <AudioPlayerBar currentTrack={currentTrack} />
+      {/* 3. Floating "LAST REGENERATIONS" Widget on Bottom-Right */}
+      <LastRegenerations
+        history={history}
+        onClearHistory={handleClearHistory}
+        activeTrackId={activeTrackId}
+        onPlayTrack={playTrack}
+        onPauseTrack={pauseTrack}
+        isPlaying={isPlaying}
+        playbackProgress={playbackProgress}
+      />
+
+      {/* 4. Modals */}
+      <VoiceModal
+        isOpen={isVoiceModalOpen}
+        onClose={() => setIsVoiceModalOpen(false)}
+        voices={voices}
+        selectedVoiceId={selectedVoice.id}
+        onSelectVoice={setSelectedVoice}
+      />
+
+      <PricingModal
+        isOpen={isPricingModalOpen}
+        onClose={() => setIsPricingModalOpen(false)}
+        quota={quota}
+        onQuotaUpdated={refreshData}
+      />
+
+      <ServerModal
+        isOpen={isServerModalOpen}
+        onClose={() => setIsServerModalOpen(false)}
+        onServerChanged={refreshData}
+      />
+
+      <DeveloperModal
+        isOpen={isDeveloperModalOpen}
+        onClose={() => setIsDeveloperModalOpen(false)}
+        voices={voices}
+        quota={quota}
+        onOpenPricing={() => {
+          setIsDeveloperModalOpen(false);
+          setIsPricingModalOpen(true);
+        }}
+      />
+
+      <LegalModal
+        isOpen={isLegalModalOpen}
+        onClose={() => setIsLegalModalOpen(false)}
+        onOpenDocument={(docId) => navigateToLegal(docId)}
+      />
     </div>
   );
 };

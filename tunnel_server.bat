@@ -1,13 +1,16 @@
 @echo off
-title Kokoro Voice Studio - Mobile Tunnel Gateway
+title Kokoro Voice Studio Pro - Permanent Cloud Gateway
 echo ============================================================
-echo   Kokoro Voice Studio - Mobile HTTPS Tunnel Gateway
-echo   Lead Developer: Dilshan Chandrarathne
-echo   Public Secure URL: https://kokoro-studio-dilshan.loca.lt
+echo   Kokoro Voice Studio Pro - Permanent Cloud Gateway
+echo   Fixed Domain: https://kokoro-studio-dilshan.loca.lt
 echo ============================================================
 echo.
-echo [*] Forwarding local port 8000 to https://kokoro-studio-dilshan.loca.lt ...
-echo [*] Connect your mobile app instantly with ZERO firewall/hotspot issues!
+echo [*] Starting Kokoro FastAPI Backend on port 8000...
+start /b python server.py
+timeout /t 3 /nobreak >nul
+echo.
+echo [*] Launching Fixed Domain Tunnel...
+echo [*] Public URL: https://kokoro-studio-dilshan.loca.lt
 echo.
 npx -y localtunnel --port 8000 --subdomain kokoro-studio-dilshan
 pause

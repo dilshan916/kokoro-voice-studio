@@ -1,226 +1,207 @@
-import React, { useState } from 'react';
-import { SlidersHorizontal, ExternalLink, Info, X, Heart, Cpu, Code2, Sparkles, User } from 'lucide-react';
-import { HealthData } from '../types';
+import React, { useState, useRef, useEffect } from 'react';
+import { Sun, Moon, ChevronDown, Server, Smartphone, Terminal } from 'lucide-react';
+import { HealthData, UserQuota } from '../types';
 
 interface NavbarProps {
   health: HealthData | null;
-  isLoading: boolean;
-  onRefreshHealth: () => void;
-  onToggleInspector: () => void;
-  isInspectorOpen: boolean;
+  quota: UserQuota | null;
+  onOpenVoices: () => void;
+  onOpenPricing: () => void;
+  onOpenDevelopers: () => void;
+  onOpenServer: () => void;
+  isDarkMode: boolean;
+  onToggleDarkMode: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   health,
-  isLoading,
-  onRefreshHealth,
-  onToggleInspector,
-  isInspectorOpen,
+  quota,
+  onOpenVoices,
+  onOpenPricing,
+  onOpenDevelopers,
+  onOpenServer,
+  isDarkMode,
+  onToggleDarkMode,
 }) => {
-  const [showCreditsModal, setShowCreditsModal] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
   const isOnline = health?.status === 'ready';
-  const isModelLoading = health?.status === 'loading';
+  const isPro = quota?.tier === 'pro';
+
+  // Close menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
-    <>
-      <header className="h-16 bg-studio-bg/80 backdrop-blur-md border-b border-white/[0.06] px-6 flex items-center justify-between shrink-0 select-none z-30">
-        {/* Brand & Studio Title + Info Button */}
-        <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-2">
-            <span className="font-bold text-lg tracking-tight text-white font-sans">
-              Kokoro <span className="font-light text-gray-400">Studio</span>
-            </span>
+    <header className="sticky top-0 z-40 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-blue-100/60 dark:border-slate-800 select-none">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+        {/* Left: Brand Logo & Title */}
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-full overflow-hidden shadow-md shadow-blue-500/20 flex items-center justify-center">
+            <img src="/favicon.png?v=round1" alt="Kokoro Studio App Icon" className="w-full h-full object-cover" />
           </div>
-
-          {/* Info & Credits Button */}
-          <button
-            onClick={() => setShowCreditsModal(true)}
-            className="w-7 h-7 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] text-gray-400 hover:text-white flex items-center justify-center transition-all border border-white/[0.06] hover:border-white/[0.15]"
-            title="About Kokoro Studio & Credits"
-          >
-            <Info className="w-3.5 h-3.5" />
-          </button>
+          <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-white font-sans">
+            Kokoro<span className="text-blue-600 font-bold ml-0.5">Studio</span>
+          </span>
         </div>
 
-        {/* Right Actions: Live Engine Status & Settings */}
-        <div className="flex items-center space-x-3">
-          {/* Minimalist Engine Status Indicator */}
-          <button
-            onClick={onRefreshHealth}
-            title="Engine Status (click to refresh)"
-            className={`flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-              isOnline
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                : isModelLoading
-                ? 'bg-amber-500/10 text-amber-300 border-amber-500/20 animate-pulse'
-                : 'bg-rose-500/10 text-rose-300 border-rose-500/20'
-            }`}
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isOnline
-                  ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]'
-                  : isModelLoading
-                  ? 'bg-amber-400'
-                  : 'bg-rose-400'
-              }`}
-            />
-            <span>
-              {isLoading
-                ? 'Checking...'
-                : isOnline
-                ? 'Ready'
-                : isModelLoading
-                ? 'Loading Model...'
-                : 'Offline'}
-            </span>
-          </button>
-
-          {/* Audio Fine-Tuning / Master Settings Toggle Button */}
-          <button
-            onClick={onToggleInspector}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
-              isInspectorOpen
-                ? 'bg-brand-primary text-white border-brand-primary shadow-glow-primary'
-                : 'bg-studio-surface/80 hover:bg-studio-card text-gray-300 hover:text-white border-white/[0.08]'
-            }`}
-            title="Audio Settings & Acoustic Mastering EQ"
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span>Audio Settings</span>
-          </button>
-
-          {/* API Docs Link */}
+        {/* Center: Clean Nav Links (Home, Voices, Pricing - NO API/Docs) */}
+        <nav className="hidden sm:flex items-center gap-8 text-sm font-medium text-slate-600 dark:text-slate-300">
           <a
-            href="http://127.0.0.1:8000/docs"
-            target="_blank"
-            rel="noreferrer"
-            className="p-2 rounded-xl text-studio-muted hover:text-white hover:bg-studio-surface/80 border border-transparent hover:border-white/[0.06] transition-all"
-            title="FastAPI Swagger Documentation"
+            href="#home"
+            className="text-slate-900 dark:text-white font-semibold hover:text-blue-600 transition-colors"
           >
-            <ExternalLink className="w-4 h-4" />
+            Home
           </a>
-        </div>
-      </header>
-
-      {/* Credits & About Modal */}
-      {showCreditsModal && (
-        <div
-          className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-150"
-          onClick={() => setShowCreditsModal(false)}
-        >
-          <div
-            className="w-full max-w-lg bg-studio-surface border border-white/[0.12] rounded-3xl p-6 shadow-2xl space-y-5 select-none"
-            onClick={(e) => e.stopPropagation()}
+          <button
+            onClick={onOpenVoices}
+            className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
           >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-white/[0.06] pb-4">
-              <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  Kokoro Voice Studio
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-primary/20 text-brand-primary font-mono">
-                    v2.5.0 PRO
-                  </span>
-                </h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Ultra-Fast Neural Speech Synthesis & Audio Workstation
-                </p>
-              </div>
-
-              <button
-                onClick={() => setShowCreditsModal(false)}
-                className="p-1.5 rounded-xl text-gray-400 hover:text-white hover:bg-white/[0.06] transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Credits List */}
-            <div className="space-y-3.5 text-xs text-gray-300">
-              {/* Lead Developer */}
-              <a
-                href="https://github.com/dilshan916/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-3.5 rounded-2xl bg-brand-primary/[0.06] hover:bg-brand-primary/[0.12] border border-brand-primary/20 hover:border-brand-primary/40 flex items-center justify-between transition-all group cursor-pointer shadow-sm hover:shadow-glow-primary"
-                title="Visit Dilshan Chandrarathne on GitHub"
-              >
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-xl bg-brand-primary/20 text-brand-primary group-hover:scale-105 transition-transform flex items-center justify-center shrink-0">
-                    <User className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-brand-primary uppercase tracking-wider font-bold">
-                      Lead Developer & Architect
-                    </div>
-                    <div className="text-sm font-semibold text-white mt-0.5 group-hover:text-brand-primary transition-colors flex items-center gap-1.5">
-                      <span>Dilshan Chandrarathne</span>
-                      <span className="text-[10px] text-gray-400 font-mono font-normal">@dilshan916</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-white/[0.06] group-hover:bg-white/[0.1] text-gray-400 group-hover:text-white transition-all text-[11px]">
-                  <span>GitHub</span>
-                  <ExternalLink className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
-                </div>
-              </a>
-
-              {/* Core TTS Model */}
-              <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.06] space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-white flex items-center gap-1.5">
-                    <Cpu className="w-3.5 h-3.5 text-brand-accent" /> Kokoro-82M ONNX
-                  </span>
-                  <span className="text-[10px] font-mono text-gray-400">@hexgrad</span>
-                </div>
-                <p className="text-[11px] text-gray-400 leading-relaxed">
-                  Open-weights state-of-the-art 82M parameter neural speech model with 60 studio voices across 9+ languages.
-                </p>
-              </div>
-
-              {/* G2P & Phonemizers */}
-              <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.06] space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-white flex items-center gap-1.5">
-                    <Code2 className="w-3.5 h-3.5 text-brand-secondary" /> Multilingual G2P Engines
-                  </span>
-                  <span className="text-[10px] font-mono text-gray-400">Open Source</span>
-                </div>
-                <p className="text-[11px] text-gray-400 leading-relaxed">
-                  Misaki (Japanese/English G2P), PyOpenJTalk, Janome Morphological POS Analyzer, and eSpeak-NG.
-                </p>
-              </div>
-
-              {/* CapCut Subtitles & Audio Player */}
-              <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.06] space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-white flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-brand-success" /> Studio DAW & Subtitle Engine
-                  </span>
-                  <span className="text-[10px] font-mono text-gray-400">WaveSurfer.js + FastAPI</span>
-                </div>
-                <p className="text-[11px] text-gray-400 leading-relaxed">
-                  Real-time waveform visualization, acoustic DSP mastering presets, and frame-accurate CapCut/Premiere SRT exporter.
-                </p>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between text-[11px] text-gray-500">
-              <span className="flex items-center gap-1">
-                Built with <Heart className="w-3 h-3 text-rose-500 fill-rose-500" /> for creators & developers
+            Voices
+          </button>
+          <button
+            onClick={onOpenPricing}
+            className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <span>Pricing</span>
+            {isPro && (
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold">
+                PRO
               </span>
-              <button
-                onClick={() => setShowCreditsModal(false)}
-                className="px-4 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-xs font-semibold text-white transition-all"
-              >
-                Close
-              </button>
-            </div>
+            )}
+          </button>
+          <button
+            onClick={onOpenDevelopers}
+            className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <Terminal className="w-3.5 h-3.5 text-blue-500" />
+            <span>API</span>
+          </button>
+        </nav>
+
+        {/* Right: Theme Toggle & User Avatar Dropdown */}
+        <div className="flex items-center gap-3">
+          {/* Light / Dark Mode Toggle */}
+          <button
+            onClick={onToggleDarkMode}
+            className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer shadow-sm"
+            title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          >
+            {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
+          </button>
+
+          {/* User Profile Avatar with Dropdown */}
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              className="flex items-center gap-1.5 p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
+            >
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shadow-sm relative">
+                D
+                {/* Online Status Dot */}
+                <span
+                  className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${
+                    isOnline ? 'bg-emerald-500' : 'bg-rose-500'
+                  }`}
+                />
+              </div>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            </button>
+
+            {/* Dropdown Menu */}
+            {isUserMenuOpen && (
+              <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl p-3 space-y-2 z-50 text-xs animate-in fade-in slide-in-from-top-2 duration-150">
+                {/* Quota Summary */}
+                <div
+                  onClick={() => {
+                    setIsUserMenuOpen(false);
+                    onOpenPricing();
+                  }}
+                  className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 hover:bg-blue-50/60 dark:hover:bg-blue-950/30 border border-slate-200/60 dark:border-slate-700/60 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center justify-between font-bold text-slate-800 dark:text-slate-200 mb-1">
+                    <span>Account Plan</span>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                        isPro
+                          ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                          : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                      }`}
+                    >
+                      {isPro ? '⭐ PRO Unlimited' : 'Free Tier'}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {isPro
+                      ? 'Enjoy unlimited speech generations'
+                      : `${quota?.monthly_usage || 0} / 20,000 characters used`}
+                  </div>
+                </div>
+
+                {/* Developer API & Keys */}
+                <button
+                  onClick={() => {
+                    setIsUserMenuOpen(false);
+                    onOpenDevelopers();
+                  }}
+                  className="w-full p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700/60 text-left flex items-center justify-between text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+                >
+                  <span className="flex items-center gap-2">
+                    <Terminal className="w-3.5 h-3.5 text-blue-500" />
+                    Developer API &amp; Keys
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                    REST API
+                  </span>
+                </button>
+
+                {/* Server Status & Settings */}
+                <button
+                  onClick={() => {
+                    setIsUserMenuOpen(false);
+                    onOpenServer();
+                  }}
+                  className="w-full p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700/60 text-left flex items-center justify-between text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+                >
+                  <span className="flex items-center gap-2">
+                    <Server className="w-3.5 h-3.5 text-blue-500" />
+                    Server Connection
+                  </span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
+                      isOnline
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-rose-500/10 text-rose-500'
+                    }`}
+                  >
+                    {isOnline ? 'Online' : 'Offline'}
+                  </span>
+                </button>
+
+                {/* Mobile App Download */}
+                <a
+                  href="https://github.com/dilshan916/kokoro-voice-studio/releases/download/v1.0.0/kokoro-voice-studio-v1.0.0-universal.apk"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700/60 text-left flex items-center gap-2 text-slate-700 dark:text-slate-200 transition-colors"
+                >
+                  <Smartphone className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Download Android App (APK)</span>
+                </a>
+              </div>
+            )}
           </div>
         </div>
-      )}
-    </>
+      </div>
+    </header>
   );
 };
+export default Navbar;

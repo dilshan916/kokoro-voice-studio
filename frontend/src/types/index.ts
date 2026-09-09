@@ -76,3 +76,46 @@ export interface AudioTrack {
   srt_content?: string;
   srt_filename?: string;
 }
+
+export interface UserQuota {
+  device_id: string;
+  tier: 'free' | 'pro';
+  monthly_limit: number;
+  monthly_usage: number;
+  remaining_chars: number | string;
+  is_pro?: boolean;
+  billing_cycle_month?: string;
+  has_subscription?: boolean;
+  cancel_at_period_end?: boolean;
+  subscription_expires_at?: string;
+}
+
+export interface GenerationHistoryItem {
+  id: string;
+  title: string;
+  voice_name: string;
+  voice_flag: string;
+  audio_url: string;
+  filename: string;
+  duration: number;
+  timestamp: number;
+  formatted_time: string;
+  srt_content?: string;
+  srt_filename?: string;
+  audio_base64?: string;
+}
+
+export interface ApiKeyItem {
+  key_id: string;
+  api_key: string;
+  masked_key: string;
+  name: string;
+  tier: string;
+  monthly_usage: number;
+  monthly_limit: number;
+  is_active: boolean;
+  created_at: string;
+  last_used_at?: string | null;
+}
+
+

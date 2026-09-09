@@ -29,3 +29,16 @@ build/
 venv/
 data/
 *.db
+
+# Credentials, Keys & Secrets
+*.pem
+*.key
+*.cert
+*.env
+config.yml
+*.apk
+
+# Audio files & test outputs
+*.mp3
+*.wav
+*.srt

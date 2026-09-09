@@ -80,6 +80,29 @@ class BillingDB:
                 cursor.execute("ALTER TABLE devices ADD COLUMN fingerprint TEXT")
             if "client_ip" not in columns:
                 cursor.execute("ALTER TABLE devices ADD COLUMN client_ip TEXT")
+            if "cancel_at_period_end" not in columns:
+                cursor.execute("ALTER TABLE devices ADD COLUMN cancel_at_period_end INTEGER NOT NULL DEFAULT 0")
+            if "subscription_expires_at" not in columns:
+                cursor.execute("ALTER TABLE devices ADD COLUMN subscription_expires_at TEXT")
+
+            # Automatic migration: Extract customer & sub IDs from note if not set
+            try:
+                import re
+                cursor.execute("SELECT device_id, note FROM devices WHERE stripe_subscription_id IS NULL AND note LIKE '%Sub: sub_%'")
+                for r in cursor.fetchall():
+                    d_id = r["device_id"]
+                    n_txt = r["note"] or ""
+                    c_match = re.search(r"Customer:\s*(cus_[a-zA-Z0-9]+)", n_txt)
+                    s_match = re.search(r"Sub:\s*(sub_[a-zA-Z0-9]+)", n_txt)
+                    if c_match or s_match:
+                        c_val = c_match.group(1) if c_match else None
+                        s_val = s_match.group(1) if s_match else None
+                        cursor.execute(
+                            "UPDATE devices SET stripe_customer_id = COALESCE(?, stripe_customer_id), stripe_subscription_id = COALESCE(?, stripe_subscription_id) WHERE device_id = ?",
+                            (c_val, s_val, d_id),
+                        )
+            except Exception as mig_err:
+                logger.warning(f"Note migration warning: {mig_err}")
 
             # 2. License / Promo Keys Table
             cursor.execute(
@@ -115,6 +138,27 @@ class BillingDB:
             log_columns = [row["name"] for row in cursor.fetchall()]
             if "client_ip" not in log_columns:
                 cursor.execute("ALTER TABLE usage_logs ADD COLUMN client_ip TEXT")
+
+            # 4. API Keys Table (for Paid Developer API & OpenAI compatibility)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    key_id TEXT PRIMARY KEY,
+                    api_key TEXT UNIQUE NOT NULL,
+                    device_id TEXT NOT NULL,
+                    name TEXT NOT NULL DEFAULT 'Default API Key',
+                    tier TEXT NOT NULL DEFAULT 'free',
+                    monthly_usage INTEGER NOT NULL DEFAULT 0,
+                    monthly_limit INTEGER NOT NULL DEFAULT 20000,
+                    billing_cycle_month TEXT NOT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    last_used_at TEXT
+                )
+                """
+            )
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_token ON api_keys(api_key)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_device ON api_keys(device_id)")
 
             conn.commit()
 
@@ -175,6 +219,21 @@ class BillingDB:
                     updates.append("client_ip = ?")
                     params.append(clean_ip)
 
+                # Check if prepaid Pro subscription has expired
+                row_dict = dict(row)
+                if row_dict.get("tier") == "pro" and row_dict.get("subscription_expires_at"):
+                    try:
+                        exp_str = str(row_dict["subscription_expires_at"]).replace("Z", "+00:00")
+                        exp_dt = datetime.datetime.fromisoformat(exp_str)
+                        now_dt = datetime.datetime.now(datetime.timezone.utc)
+                        if now_dt >= exp_dt:
+                            updates.append("tier = 'free'")
+                            updates.append("cancel_at_period_end = 0")
+                            updates.append("note = 'Subscription expired after 30-day prepaid period'")
+                            logger.info(f"Device '{clean_id}' Pro period ended on {exp_dt} -> reverted to free tier")
+                    except Exception as ex_err:
+                        logger.warning(f"Error checking subscription expiry for {clean_id}: {ex_err}")
+
                 # Monthly cycle reset check
                 if row["billing_cycle_month"] != current_cycle:
                     updates.append("monthly_usage = 0")
@@ -197,7 +256,7 @@ class BillingDB:
             note = None
             prev_match = None
 
-            # 1. Match by persistent hardware fingerprint
+            # 1. Match by persistent hardware fingerprint (ONLY for the exact same physical phone)
             if clean_fp:
                 cursor.execute(
                     "SELECT * FROM devices WHERE fingerprint = ? AND billing_cycle_month = ? ORDER BY updated_at DESC LIMIT 1",
@@ -209,20 +268,8 @@ class BillingDB:
                     inherited_usage = prev_match["monthly_usage"]
                     inherited_limit = prev_match["monthly_limit"]
                     inherited_key = prev_match["license_key"]
-                    note = f"Linked via fingerprint to {prev_match['device_id']}"
+                    note = f"Linked via hardware fingerprint to {prev_match['device_id']}"
                     logger.info(f"Anti-Reset match by fingerprint: Device '{clean_id}' inherited {inherited_usage} chars usage / {inherited_tier} tier.")
-
-            # 2. Match by IP address if within current cycle
-            if not prev_match and clean_ip and clean_ip not in ("127.0.0.1", "localhost", ""):
-                cursor.execute(
-                    "SELECT * FROM devices WHERE client_ip = ? AND billing_cycle_month = ? AND monthly_usage > 0 ORDER BY updated_at DESC LIMIT 1",
-                    (clean_ip, current_cycle),
-                )
-                ip_match = cursor.fetchone()
-                if ip_match and ip_match["tier"] == "free":
-                    inherited_usage = ip_match["monthly_usage"]
-                    note = f"Linked via IP to {ip_match['device_id']}"
-                    logger.info(f"Anti-Reset match by IP: Device '{clean_id}' inherited {inherited_usage} chars usage.")
 
             # Insert new device profile with preserved usage
             cursor.execute(
@@ -263,6 +310,11 @@ class BillingDB:
 
         remaining = max(0, limit - usage) if not is_pro else 999999999
 
+        has_sub = bool(
+            device.get("stripe_subscription_id")
+            or (device.get("note") and "Sub: sub_" in str(device.get("note")))
+        )
+
         return {
             "device_id": device["device_id"],
             "tier": tier,
@@ -273,6 +325,11 @@ class BillingDB:
             "percent_used": min(100.0, round((usage / limit) * 100, 1)) if not is_pro and limit > 0 else 0.0,
             "billing_cycle": device["billing_cycle_month"],
             "license_key": device.get("license_key"),
+            "has_subscription": has_sub,
+            "cancel_at_period_end": bool(device.get("cancel_at_period_end", 0)),
+            "subscription_expires_at": device.get("subscription_expires_at"),
+            "stripe_customer_id": device.get("stripe_customer_id"),
+            "stripe_subscription_id": device.get("stripe_subscription_id"),
         }
 
     def check_and_consume_quota(
@@ -419,22 +476,150 @@ class BillingDB:
         logger.info(f"Generated batch of {count} single-use license codes with prefix '{prefix}'")
         return generated
 
-    def grant_pro(self, device_id: str, tier: str = "pro", note: str = "Admin manual grant") -> Dict[str, Any]:
-        """Admin helper: Directly grants Pro status to any device ID."""
+    def get_device_raw(self, device_id: str) -> Optional[Dict[str, Any]]:
+        """Returns the raw SQLite row dictionary for a device."""
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM devices WHERE device_id = ?", (device_id.strip(),))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def grant_pro(
+        self,
+        device_id: str,
+        tier: str = "pro",
+        note: str = "Admin manual grant",
+        stripe_customer_id: Optional[str] = None,
+        stripe_subscription_id: Optional[str] = None,
+        cancel_at_period_end: int = 0,
+        subscription_expires_at: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Directly grants Pro status to any device ID and stores payment metadata with 30-day expiration."""
         clean_id = device_id.strip()
         self.get_or_create_device(clean_id)
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        now = now_dt.isoformat()
+
+        if not subscription_expires_at:
+            # Default to 30 days prepaid period
+            subscription_expires_at = (now_dt + datetime.timedelta(days=30)).isoformat()
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE devices SET tier = ?, note = ?, updated_at = ? WHERE device_id = ?",
-                (tier, note, now, clean_id),
+                """
+                UPDATE devices 
+                SET tier = ?, 
+                    note = ?, 
+                    stripe_customer_id = COALESCE(?, stripe_customer_id),
+                    stripe_subscription_id = COALESCE(?, stripe_subscription_id),
+                    cancel_at_period_end = ?,
+                    subscription_expires_at = ?,
+                    updated_at = ? 
+                WHERE device_id = ?
+                """,
+                (tier, note, stripe_customer_id, stripe_subscription_id, cancel_at_period_end, subscription_expires_at, now, clean_id),
             )
             conn.commit()
 
-        logger.info(f"Admin granted {tier.upper()} status to device '{clean_id}' ({note})")
+        logger.info(f"Updated status for device '{clean_id}': tier={tier}, sub={stripe_subscription_id}, expires_at={subscription_expires_at}")
         return self.get_device_quota(clean_id)
+
+    def update_subscription_renewal(
+        self, device_id: str, cancel_at_period_end: bool
+    ) -> Dict[str, Any]:
+        """
+        Toggles whether a subscription auto-renews at the end of the 30-day period.
+        Pro status is preserved for the full 30 days regardless of toggle state.
+        """
+        clean_id = device_id.strip()
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        now = now_dt.isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT subscription_expires_at FROM devices WHERE device_id = ?", (clean_id,))
+            row = cursor.fetchone()
+            exp_at = row["subscription_expires_at"] if row and row["subscription_expires_at"] else (now_dt + datetime.timedelta(days=30)).isoformat()
+
+            cursor.execute(
+                "UPDATE devices SET cancel_at_period_end = ?, subscription_expires_at = ?, updated_at = ? WHERE device_id = ?",
+                (1 if cancel_at_period_end else 0, exp_at, now, clean_id),
+            )
+            conn.commit()
+        logger.info(f"Device '{clean_id}' auto-renewal updated: cancel_at_period_end={cancel_at_period_end}, active until {exp_at}")
+        return self.get_device_quota(clean_id)
+
+    def cancel_subscription_immediate(
+        self, device_id: str, note: str = "Subscription cancelled - retains Pro until period end"
+    ) -> Dict[str, Any]:
+        """
+        Cancels future subscription renewals while strictly preserving Pro features
+        until the 30-day prepaid billing period expires. Never wipes features immediately.
+        """
+        clean_id = device_id.strip()
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        now = now_dt.isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT subscription_expires_at FROM devices WHERE device_id = ?", (clean_id,))
+            row = cursor.fetchone()
+            exp_at = row["subscription_expires_at"] if row and row["subscription_expires_at"] else (now_dt + datetime.timedelta(days=30)).isoformat()
+
+            cursor.execute(
+                """
+                UPDATE devices 
+                SET cancel_at_period_end = 1,
+                    subscription_expires_at = ?,
+                    note = ?, 
+                    updated_at = ? 
+                WHERE device_id = ?
+                """,
+                (exp_at, note, now, clean_id),
+            )
+            conn.commit()
+        logger.info(f"Device '{clean_id}' subscription cancelled -> retains Pro features until {exp_at}")
+        return self.get_device_quota(clean_id)
+
+    def cancel_subscription_by_sub_id(self, subscription_id: str, note: str = "Subscription expired") -> None:
+        """
+        Syncs subscription cancellation by ID.
+        Preserves Pro access if the prepaid 30-day period has not elapsed yet.
+        """
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        now = now_dt.isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT device_id, subscription_expires_at FROM devices WHERE stripe_subscription_id = ?", (subscription_id.strip(),))
+            rows = cursor.fetchall()
+            for r in rows:
+                exp_at = r["subscription_expires_at"]
+                if exp_at:
+                    try:
+                        exp_dt = datetime.datetime.fromisoformat(str(exp_at).replace("Z", "+00:00"))
+                        if now_dt < exp_dt:
+                            cursor.execute(
+                                "UPDATE devices SET cancel_at_period_end = 1, note = ?, updated_at = ? WHERE device_id = ?",
+                                (f"{note} (retains Pro until {exp_at})", now, r["device_id"]),
+                            )
+                            continue
+                    except Exception:
+                        pass
+                cursor.execute(
+                    "UPDATE devices SET tier = 'free', cancel_at_period_end = 0, note = ?, updated_at = ? WHERE device_id = ?",
+                    (note, now, r["device_id"]),
+                )
+            conn.commit()
+
+    def sync_subscription_status_by_sub_id(self, subscription_id: str, cancel_at_period_end: bool) -> None:
+        """Syncs cancel_at_period_end flag from webhook."""
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE devices SET cancel_at_period_end = ?, updated_at = ? WHERE stripe_subscription_id = ?",
+                (1 if cancel_at_period_end else 0, now, subscription_id.strip()),
+            )
+            conn.commit()
 
     def create_license_key(
         self, code: str, tier: str = "pro", max_uses: int = 1, note: str = ""
@@ -490,6 +675,237 @@ class BillingDB:
             conn.commit()
         return self.get_device_quota(clean_id)
 
+    # ========================================================================
+    # Paid Developer API Key Management & Authentication
+    # ========================================================================
+
+    def create_api_key(
+        self, device_id: str, name: str = "Default API Key"
+    ) -> Dict[str, Any]:
+        """
+        Generates a new secure API key bound to a device ID.
+        Inherits the device's tier and monthly limit.
+        """
+        import secrets
+        clean_id = device_id.strip() if device_id else "dev_anonymous"
+        clean_name = name.strip() or "Default API Key"
+        key_id = f"key_{secrets.token_hex(6)}"
+        token = f"sk_live_kokoro_{secrets.token_hex(16)}"
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        current_cycle = self._current_cycle_month()
+
+        # Check device tier
+        device = self.get_or_create_device(clean_id)
+        tier = device.get("tier", "free")
+        limit = device.get("monthly_limit", DEFAULT_FREE_MONTHLY_LIMIT)
+
+        # Free tier is restricted to 1 active API key
+        if tier != "pro":
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT COUNT(*) FROM api_keys WHERE device_id = ? AND is_active = 1",
+                    (clean_id,),
+                )
+                row = cursor.fetchone()
+                active_count = row[0] if row else 0
+                if active_count >= 1:
+                    raise ValueError(
+                        "Free plan users are restricted to 1 active API key. "
+                        "Please revoke your existing API key or upgrade to Pro to create more."
+                    )
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO api_keys (
+                    key_id, api_key, device_id, name, tier, monthly_usage,
+                    monthly_limit, billing_cycle_month, is_active, created_at
+                ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, 1, ?)
+                """,
+                (key_id, token, clean_id, clean_name, tier, limit, current_cycle, now),
+            )
+            conn.commit()
+
+        logger.info(f"Created API key {key_id} for device {clean_id} (tier={tier})")
+        return {
+            "key_id": key_id,
+            "api_key": token,
+            "name": clean_name,
+            "tier": tier,
+            "monthly_usage": 0,
+            "monthly_limit": limit,
+            "is_active": True,
+            "created_at": now,
+        }
+
+    def list_api_keys(self, device_id: str) -> List[Dict[str, Any]]:
+        """List all active API keys for a device ID."""
+        clean_id = device_id.strip() if device_id else "dev_anonymous"
+        current_cycle = self._current_cycle_month()
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Fetch current parent device tier
+            cursor.execute("SELECT tier, monthly_limit FROM devices WHERE device_id = ?", (clean_id,))
+            dev_row = cursor.fetchone()
+            dev_tier = dev_row["tier"] if dev_row else "free"
+            dev_limit = -1 if dev_tier == "pro" else (dev_row["monthly_limit"] if dev_row else DEFAULT_FREE_MONTHLY_LIMIT)
+
+            cursor.execute(
+                "SELECT * FROM api_keys WHERE device_id = ? AND is_active = 1 ORDER BY created_at DESC",
+                (clean_id,),
+            )
+            rows = cursor.fetchall()
+            results = []
+            for r in rows:
+                k = dict(r)
+                k["tier"] = dev_tier
+                k["monthly_limit"] = dev_limit
+                # Cycle reset check
+                if k["billing_cycle_month"] != current_cycle:
+                    cursor.execute(
+                        "UPDATE api_keys SET monthly_usage = 0, billing_cycle_month = ? WHERE key_id = ?",
+                        (current_cycle, k["key_id"]),
+                    )
+                    k["monthly_usage"] = 0
+                    k["billing_cycle_month"] = current_cycle
+
+                raw_key = k["api_key"]
+                masked = f"{raw_key[:18]}...{raw_key[-4:]}" if len(raw_key) > 22 else raw_key
+                k["masked_key"] = masked
+                k["is_active"] = bool(k["is_active"])
+                results.append(k)
+            conn.commit()
+            return results
+
+    def revoke_api_key(self, device_id: str, key_id: str) -> bool:
+        """Deactivates an API key."""
+        clean_id = device_id.strip() if device_id else "dev_anonymous"
+        clean_kid = key_id.strip()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE api_keys SET is_active = 0 WHERE key_id = ? AND device_id = ?",
+                (clean_kid, clean_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def authenticate_api_key(self, api_key: str) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+        """
+        Validates API key token.
+        Returns (is_valid, key_dict, error_message).
+        """
+        if not api_key or not api_key.strip():
+            return False, None, "Missing API key in Authorization header"
+
+        clean_token = api_key.strip()
+        current_cycle = self._current_cycle_month()
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM api_keys WHERE api_key = ? AND is_active = 1",
+                (clean_token,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False, None, "Invalid or revoked API key"
+
+            key_dict = dict(row)
+            # Cycle reset check
+            if key_dict["billing_cycle_month"] != current_cycle:
+                cursor.execute(
+                    "UPDATE api_keys SET monthly_usage = 0, billing_cycle_month = ? WHERE key_id = ?",
+                    (current_cycle, key_dict["key_id"]),
+                )
+                conn.commit()
+                key_dict["monthly_usage"] = 0
+                key_dict["billing_cycle_month"] = current_cycle
+
+            # Sync key tier dynamically with parent device's current tier
+            cursor.execute("SELECT tier, monthly_limit FROM devices WHERE device_id = ?", (key_dict["device_id"],))
+            dev_row = cursor.fetchone()
+            if dev_row:
+                dev_tier = dev_row["tier"]
+                key_dict["tier"] = dev_tier
+                if dev_tier == "pro":
+                    key_dict["monthly_limit"] = -1
+                else:
+                    key_dict["monthly_limit"] = dev_row["monthly_limit"]
+
+            return True, key_dict, "OK"
+
+    def check_and_consume_api_key_quota(
+        self, api_key: str, char_count: int, client_ip: str = "", voice_id: str = ""
+    ) -> Tuple[bool, Dict[str, Any], str]:
+        """
+        Deducts characters from the API key's quota.
+        """
+        is_valid, key_data, err = self.authenticate_api_key(api_key)
+        if not is_valid or not key_data:
+            return False, {}, err
+
+        tier = key_data["tier"]
+        usage = key_data["monthly_usage"]
+        limit = key_data["monthly_limit"]
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        # Pro / Unlimited checks
+        if tier == "pro" or limit < 0:
+            new_usage = usage + char_count
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE api_keys SET monthly_usage = ?, last_used_at = ? WHERE key_id = ?",
+                    (new_usage, now, key_data["key_id"]),
+                )
+                cursor.execute(
+                    "INSERT INTO usage_logs (device_id, char_count, voice_id, client_ip, timestamp) VALUES (?, ?, ?, ?, ?)",
+                    (f"api:{key_data['key_id']}", char_count, voice_id, client_ip, now),
+                )
+                conn.commit()
+
+            return True, {
+                "tier": "pro",
+                "monthly_usage": new_usage,
+                "monthly_limit": -1,
+                "remaining_chars": "unlimited",
+            }, "OK"
+
+        # Quota check for free/metered tier
+        if usage + char_count > limit:
+            remaining = max(0, limit - usage)
+            return False, {
+                "tier": tier,
+                "monthly_usage": usage,
+                "monthly_limit": limit,
+                "remaining_chars": remaining,
+            }, f"Monthly API character quota exceeded ({usage:,}/{limit:,}). Please upgrade or top up credits."
+
+        new_usage = usage + char_count
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE api_keys SET monthly_usage = ?, last_used_at = ? WHERE key_id = ?",
+                (new_usage, now, key_data["key_id"]),
+            )
+            cursor.execute(
+                "INSERT INTO usage_logs (device_id, char_count, voice_id, client_ip, timestamp) VALUES (?, ?, ?, ?, ?)",
+                (f"api:{key_data['key_id']}", char_count, voice_id, client_ip, now),
+            )
+            conn.commit()
+
+        return True, {
+            "tier": tier,
+            "monthly_usage": new_usage,
+            "monthly_limit": limit,
+            "remaining_chars": max(0, limit - new_usage),
+        }, "OK"
+
 
 # Global singleton database instance
 billing_db = BillingDB()
+

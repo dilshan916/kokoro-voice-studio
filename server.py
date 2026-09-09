@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -115,6 +115,33 @@ class GrantProRequest(BaseModel):
     device_id: str = Field(..., description="Target Device ID")
     tier: str = Field(default="pro", description="Target tier: 'free' or 'pro'")
     note: str = Field(default="API Grant", description="Administrative note")
+
+
+class ToggleAutoRenewRequest(BaseModel):
+    device_id: str = Field(..., description="Target Device ID")
+    cancel_at_period_end: bool = Field(True, description="True to turn off auto-renew at period end, False to re-enable")
+
+
+class CancelSubscriptionRequest(BaseModel):
+    device_id: str = Field(..., description="Target Device ID")
+    immediate: bool = Field(False, description="True to cancel immediately and revert to free tier")
+
+
+class OpenAISpeechRequest(BaseModel):
+    model: str = Field(default="kokoro", description="Model name (e.g. 'kokoro', 'kokoro-82m', 'tts-1', 'tts-1-hd')")
+    input: str = Field(..., description="The text to generate audio for", min_length=1)
+    voice: str = Field(default="af_bella", description="Voice ID from catalog (e.g. af_bella, am_adam, jf_alpha)")
+    response_format: str = Field(default="mp3", description="Audio format: mp3, wav, flac, aac, opus")
+    speed: float = Field(default=1.0, ge=0.25, le=4.0, description="Speech speed multiplier (0.25 to 4.0)")
+    eq_preset: Optional[str] = Field(default="Clean Studio (Default)", description="Acoustic mastering EQ preset name")
+    lang: Optional[str] = Field(default="auto", description="Language code")
+    pause_punctuation_ms: Optional[int] = Field(default=150, description="Pause duration after commas/colons in milliseconds")
+    pause_paragraph_ms: Optional[int] = Field(default=400, description="Pause duration between paragraphs/periods in milliseconds")
+
+
+class CreateApiKeyRequest(BaseModel):
+    name: str = Field(default="Default API Key", max_length=100, description="Friendly label for this API key")
+    device_id: Optional[str] = Field(default=None, description="Anonymous client Device ID")
 
 
 class RenderResponse(BaseModel):
@@ -676,7 +703,7 @@ if not FRONTEND_DIST.exists():
     FRONTEND_DIST = Path(sys.executable).parent / "frontend" / "dist"
 
 
-@app.get("/", summary="Kokoro Voice Studio Web Application")
+@app.api_route("/", methods=["GET", "HEAD"], summary="Kokoro Voice Studio Web Application")
 async def root_spa():
     """Serves the production React 19 Studio application UI."""
     index_file = FRONTEND_DIST / "index.html"
@@ -696,6 +723,20 @@ async def root_spa():
     }
 
 
+@app.api_route("/legal", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/legal/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+async def legal_spa_route(path: str = ""):
+    """Serves the production React Legal Center for direct URL navigation and page refreshes."""
+    index_file = FRONTEND_DIST / "index.html"
+    if index_file.exists():
+        return FileResponse(
+            path=str(index_file),
+            media_type="text/html",
+            headers={"Cache-Control": "no-cache"},
+        )
+    return RedirectResponse(url="/")
+
+
 @app.get("/api", summary="API Overview")
 async def api_overview():
     """Returns basic server information and status."""
@@ -710,19 +751,42 @@ async def api_overview():
 
 
 @app.get("/icon.png", summary="Application Icon (PNG)")
-async def serve_icon_png():
-    for p in [BASE_DIR / "icon.png", FRONTEND_DIST / "icon.png", Path("icon.png")]:
+@app.get("/favicon.png", include_in_schema=False)
+@app.get("/favicon-32x32.png", include_in_schema=False)
+@app.get("/favicon-16x16.png", include_in_schema=False)
+@app.get("/favicon-48x48.png", include_in_schema=False)
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+async def serve_icon_png(request: Request):
+    path_name = request.url.path.lstrip("/")
+    for p in [FRONTEND_DIST / path_name, FRONTEND_DIST / "favicon.png", FRONTEND_DIST / "icon.png", BASE_DIR / "icon.png"]:
         if p.exists():
             return FileResponse(p, media_type="image/png")
     raise HTTPException(status_code=404, detail="Icon not found")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
 @app.get("/icon.ico", summary="Application Favicon (ICO)")
 async def serve_icon_ico():
-    for p in [BASE_DIR / "icon.ico", FRONTEND_DIST / "icon.ico", Path("icon.ico")]:
+    for p in [FRONTEND_DIST / "favicon.ico", FRONTEND_DIST / "icon.ico", BASE_DIR / "icon.ico"]:
         if p.exists():
             return FileResponse(p, media_type="image/x-icon")
     raise HTTPException(status_code=404, detail="Icon not found")
+
+
+@app.get("/robots.txt", include_in_schema=False)
+async def serve_robots_txt():
+    for p in [FRONTEND_DIST / "robots.txt", BASE_DIR / "frontend" / "public" / "robots.txt", Path("robots.txt")]:
+        if p.exists():
+            return FileResponse(p, media_type="text/plain")
+    raise HTTPException(status_code=404, detail="robots.txt not found")
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+async def serve_sitemap_xml():
+    for p in [FRONTEND_DIST / "sitemap.xml", BASE_DIR / "frontend" / "public" / "sitemap.xml", Path("sitemap.xml")]:
+        if p.exists():
+            return FileResponse(p, media_type="application/xml")
+    raise HTTPException(status_code=404, detail="sitemap.xml not found")
 
 
 @app.get("/health", response_model=HealthResponse, summary="Engine Health & Voice Catalog")
@@ -781,12 +845,21 @@ async def render_audio(req: RenderRequest, request: Request, response: Response)
     Synthesize input text into speech with selected voice, speed, language, and EQ mastering preset.
     Enforces 20,000 characters/month for free-tier devices while granting unlimited access to Pro devices.
     """
-    # 1. Device identification & monthly quota enforcement
+    # 1. Device identification, fingerprinting & monthly quota enforcement
     device_id = (
         request.headers.get("x-device-id")
         or request.headers.get("X-Device-Id")
         or req.device_id
         or "dev_anonymous"
+    )
+    fingerprint = (
+        request.headers.get("x-device-fingerprint")
+        or request.headers.get("X-Device-Fingerprint")
+        or ""
+    )
+    client_ip = (
+        request.headers.get("x-forwarded-for")
+        or (request.client.host if request.client else "")
     )
     text_len = len(req.text or "")
 
@@ -794,6 +867,8 @@ async def render_audio(req: RenderRequest, request: Request, response: Response)
         device_id=device_id,
         char_count=text_len,
         voice_id=req.voice_id,
+        fingerprint=fingerprint,
+        client_ip=client_ip,
     )
 
     if not allowed:
@@ -853,6 +928,8 @@ async def render_audio(req: RenderRequest, request: Request, response: Response)
 # ============================================================================
 
 @app.get("/v1/user/quota", summary="Get Device Character Quota & Subscription Status")
+@app.get("/user/quota", include_in_schema=False)
+@app.get("/quota", include_in_schema=False)
 async def get_user_quota(request: Request, device_id: Optional[str] = None):
     """
     Returns monthly character usage, limit, remaining characters, and tier (free/pro).
@@ -863,10 +940,21 @@ async def get_user_quota(request: Request, device_id: Optional[str] = None):
         or request.headers.get("X-Device-Id")
         or "dev_anonymous"
     )
-    return billing_db.get_device_quota(dev_id)
+    fingerprint = (
+        request.headers.get("x-device-fingerprint")
+        or request.headers.get("X-Device-Fingerprint")
+        or ""
+    )
+    client_ip = (
+        request.headers.get("x-forwarded-for")
+        or (request.client.host if request.client else "")
+    )
+    return billing_db.get_device_quota(dev_id, fingerprint=fingerprint, client_ip=client_ip)
 
 
 @app.post("/v1/user/redeem-license", summary="Redeem VIP Promo / License Code")
+@app.post("/user/redeem-license", include_in_schema=False)
+@app.post("/redeem-license", include_in_schema=False)
 async def redeem_license(req: RedeemLicenseRequest):
     """
     Redeems a Promo / VIP License code and upgrades device to lifetime Pro.
@@ -881,46 +969,258 @@ async def redeem_license(req: RedeemLicenseRequest):
     }
 
 
+STRIPE_SECRET_KEY = os.environ.get(
+    "STRIPE_SECRET_KEY",
+    "",
+)
+STRIPE_PRICE_ID = os.environ.get(
+    "STRIPE_PRICE_ID",
+    "",
+)
+
+
 @app.post("/v1/billing/create-checkout-session", summary="Generate Stripe Checkout Link")
+@app.post("/billing/create-checkout-session", include_in_schema=False)
 async def create_checkout_session(req: CreateCheckoutRequest, request: Request):
     """
-    Creates a Stripe Checkout Session for upgrading a device to Pro.
+    Creates a real Stripe Checkout Session for upgrading a device to Pro.
     """
-    stripe_key = os.environ.get("STRIPE_SECRET_KEY")
-    price_id = os.environ.get("STRIPE_PRICE_ID")
+    # Temporarily paused
+    UPGRADES_PAUSED = True
+    if UPGRADES_PAUSED:
+        return {
+            "checkout_url": None,
+            "message": "Pro upgrades are temporarily unavailable. Please check back soon!",
+        }
 
-    base_url = str(request.base_url).rstrip("/")
-    return_url = req.return_url or f"{base_url}/billing/success?device_id={req.device_id}"
+    stripe_key = STRIPE_SECRET_KEY
+    price_id = STRIPE_PRICE_ID
+
+    # Resolve public base URL (handling Cloudflare / reverse proxy headers)
+    forwarded_proto = request.headers.get("x-forwarded-proto", "https")
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    if forwarded_host:
+        public_base_url = f"{forwarded_proto}://{forwarded_host}".rstrip("/")
+    else:
+        public_base_url = str(request.base_url).rstrip("/")
+
+    return_url = req.return_url or f"{public_base_url}/billing/success?device_id={req.device_id}&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{public_base_url}/billing/cancel?device_id={req.device_id}"
 
     if stripe_key and price_id:
         try:
             import stripe
             stripe.api_key = stripe_key
-            session = stripe.checkout.Session.create(
-                payment_method_types=["card"],
-                line_items=[{"price": price_id, "quantity": 1}],
-                mode="subscription",
-                success_url=return_url,
-                cancel_url=f"{base_url}/billing/cancel",
-                client_reference_id=req.device_id,
-                metadata={"device_id": req.device_id},
-            )
+
+            # Determine subscription vs payment
+            try:
+                price_obj = stripe.Price.retrieve(price_id)
+                mode = "subscription" if price_obj.type == "recurring" else "payment"
+            except Exception:
+                mode = "subscription"
+
+            checkout_kwargs = {
+                "line_items": [{"price": price_id, "quantity": 1}],
+                "mode": mode,
+                "success_url": return_url,
+                "cancel_url": cancel_url,
+                "client_reference_id": req.device_id,
+                "metadata": {"device_id": req.device_id},
+            }
+
+            try:
+                session = stripe.checkout.Session.create(**checkout_kwargs, managed_payments={"enabled": False})
+            except Exception:
+                session = stripe.checkout.Session.create(**checkout_kwargs)
+
+            logger.info(f"Generated Stripe Checkout session {session.id} for device '{req.device_id}'")
             return {"checkout_url": session.url}
         except Exception as e:
             logger.error(f"Stripe session creation error: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
-    # Demo / Test Checkout Fallback
     return {
-        "checkout_url": f"https://dry-eldercare-bok.ngrok-free.dev/billing/mock-checkout?device_id={req.device_id}",
-        "message": "Stripe keys not set in environment. Use VIP codes (e.g. KOKORO-VIP-FRIEND) for instant activation.",
+        "checkout_url": None,
+        "message": "Stripe billing is not configured yet.",
+    }
+
+
+@app.get("/billing/success", include_in_schema=False)
+async def billing_success(request: Request, device_id: Optional[str] = None, session_id: Optional[str] = None):
+    """
+    Handles return redirect after successful Stripe checkout.
+    Verifies session with Stripe, upgrades device to Pro in SQLite, and returns to Studio.
+    """
+    target_device = device_id or "dev_anonymous"
+
+    if session_id and STRIPE_SECRET_KEY:
+        try:
+            import stripe
+            stripe.api_key = STRIPE_SECRET_KEY
+            checkout_sess = stripe.checkout.Session.retrieve(session_id)
+            if checkout_sess.client_reference_id:
+                target_device = checkout_sess.client_reference_id
+            elif checkout_sess.metadata and checkout_sess.metadata.get("device_id"):
+                target_device = checkout_sess.metadata.get("device_id")
+
+            cust = checkout_sess.customer or ""
+            sub = checkout_sess.subscription or ""
+            
+            # Fetch Stripe subscription period end if available
+            expires_at = None
+            if sub and STRIPE_SECRET_KEY:
+                try:
+                    sub_obj = stripe.Subscription.retrieve(sub)
+                    if hasattr(sub_obj, "current_period_end") and sub_obj.current_period_end:
+                        expires_at = datetime.datetime.fromtimestamp(
+                            sub_obj.current_period_end, datetime.timezone.utc
+                        ).isoformat()
+                except Exception as sub_err:
+                    logger.warning(f"Failed to fetch current_period_end from Stripe sub {sub}: {sub_err}")
+
+            billing_db.grant_pro(
+                target_device,
+                tier="pro",
+                note=f"Stripe Paid: {session_id} (Customer: {cust}, Sub: {sub})",
+                stripe_customer_id=cust,
+                stripe_subscription_id=sub,
+                subscription_expires_at=expires_at,
+            )
+            logger.info(f"Upgraded device '{target_device}' to PRO via Stripe Checkout session {session_id} (Customer: {cust}, Sub: {sub}, Expires: {expires_at})")
+        except Exception as e:
+            logger.warning(f"Error retrieving Stripe session {session_id}: {e}")
+            billing_db.grant_pro(target_device, tier="pro", note="Stripe Checkout Redirect")
+    elif device_id:
+        billing_db.grant_pro(device_id, tier="pro", note="Stripe Checkout Redirect")
+
+    return RedirectResponse(url="/?payment=success")
+
+
+@app.get("/billing/cancel", include_in_schema=False)
+async def billing_cancel():
+    """Handles cancel redirect from Stripe Checkout."""
+    return RedirectResponse(url="/?payment=cancelled")
+
+
+@app.post("/v1/billing/toggle-auto-renew", summary="Toggle Subscription Auto-Renewal")
+async def toggle_auto_renew(req: ToggleAutoRenewRequest):
+    """
+    Turns auto-renewal on or off for a user's Pro subscription.
+    When turned off (cancel_at_period_end=True), user keeps Pro until current billing cycle ends.
+    """
+    dev = billing_db.get_device_raw(req.device_id)
+    if not dev:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    sub_id = dev.get("stripe_subscription_id")
+    cust_id = dev.get("stripe_customer_id")
+
+    # If sub_id is not yet in column, look for it in the device note
+    if not sub_id and dev.get("note"):
+        import re
+        s_match = re.search(r"Sub:\s*(sub_[a-zA-Z0-9]+)", dev["note"])
+        if s_match:
+            sub_id = s_match.group(1)
+        c_match = re.search(r"Customer:\s*(cus_[a-zA-Z0-9]+)", dev["note"])
+        if c_match:
+            cust_id = c_match.group(1)
+
+    # If still missing but cust_id present, query Stripe
+    if not sub_id and cust_id and STRIPE_SECRET_KEY:
+        try:
+            import stripe
+            stripe.api_key = STRIPE_SECRET_KEY
+            subs = stripe.Subscription.list(customer=cust_id, status="active", limit=1)
+            if subs and subs.data:
+                sub_id = subs.data[0].id
+                billing_db.grant_pro(req.device_id, tier=dev["tier"], stripe_subscription_id=sub_id, stripe_customer_id=cust_id)
+        except Exception as e:
+            logger.warning(f"Failed to lookup Stripe subscription for customer {cust_id}: {e}")
+
+    # Call Stripe API to update subscription renewal setting
+    if sub_id and STRIPE_SECRET_KEY:
+        try:
+            import stripe
+            stripe.api_key = STRIPE_SECRET_KEY
+            sub = stripe.Subscription.modify(sub_id, cancel_at_period_end=req.cancel_at_period_end)
+            logger.info(f"Stripe subscription {sub_id} cancel_at_period_end set to {sub.cancel_at_period_end}")
+        except Exception as e:
+            logger.warning(f"Notice modifying Stripe subscription {sub_id}: {e}")
+
+    updated_quota = billing_db.update_subscription_renewal(req.device_id, req.cancel_at_period_end)
+    msg = (
+        "Auto-renewal turned off. You retain full Pro Unlimited access until the end of your 30-day billing cycle. No further payments will be charged."
+        if req.cancel_at_period_end
+        else "Auto-renewal turned back on. Your subscription will renew automatically each month."
+    )
+    return {
+        "success": True,
+        "cancel_at_period_end": req.cancel_at_period_end,
+        "message": msg,
+        "quota": updated_quota,
+    }
+
+
+@app.post("/v1/billing/cancel-subscription", summary="Cancel Pro Subscription")
+async def cancel_subscription(req: CancelSubscriptionRequest):
+    """
+    Cancels the Pro subscription renewal. Pro features strictly persist for the full 30-day period.
+    """
+    dev = billing_db.get_device_raw(req.device_id)
+    if not dev:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    sub_id = dev.get("stripe_subscription_id")
+    cust_id = dev.get("stripe_customer_id")
+
+    if not sub_id and dev.get("note"):
+        import re
+        s_match = re.search(r"Sub:\s*(sub_[a-zA-Z0-9]+)", dev["note"])
+        if s_match:
+            sub_id = s_match.group(1)
+        c_match = re.search(r"Customer:\s*(cus_[a-zA-Z0-9]+)", dev["note"])
+        if c_match:
+            cust_id = c_match.group(1)
+
+    if not sub_id and cust_id and STRIPE_SECRET_KEY:
+        try:
+            import stripe
+            stripe.api_key = STRIPE_SECRET_KEY
+            subs = stripe.Subscription.list(customer=cust_id, status="active", limit=1)
+            if subs and subs.data:
+                sub_id = subs.data[0].id
+        except Exception as e:
+            logger.warning(f"Failed to lookup Stripe subscription for customer {cust_id}: {e}")
+
+    if sub_id and STRIPE_SECRET_KEY:
+        try:
+            import stripe
+            stripe.api_key = STRIPE_SECRET_KEY
+            # Schedule cancellation at period end so Stripe doesn't wipe paid days
+            stripe.Subscription.modify(sub_id, cancel_at_period_end=True)
+            logger.info(f"Scheduled Stripe subscription {sub_id} to cancel at period end")
+        except Exception as e:
+            logger.error(f"Error modifying Stripe subscription {sub_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to cancel subscription with provider: {str(e)}")
+
+    # Update local DB to set cancel_at_period_end=1 while strictly preserving Pro status
+    updated_quota = billing_db.cancel_subscription_immediate(
+        req.device_id, note="Subscription cancelled - retains Pro access until 30-day period ends"
+    )
+    msg = "Subscription cancelled. Auto-renewal is turned off. You retain full Pro Unlimited access until the end of your 30-day period. No further payments will be charged."
+
+    return {
+        "success": True,
+        "immediate": False,
+        "message": msg,
+        "quota": updated_quota,
     }
 
 
 @app.post("/v1/billing/webhook", summary="Stripe Webhook Receiver")
 async def stripe_webhook(request: Request):
     """
-    Handles Stripe webhooks (checkout.session.completed, invoice.payment_succeeded).
+    Handles Stripe webhooks (checkout.session.completed, invoice.payment_succeeded, customer.subscription.deleted).
     """
     try:
         event = await request.json()
@@ -932,9 +1232,32 @@ async def stripe_webhook(request: Request):
                 data_object.get("client_reference_id")
                 or data_object.get("metadata", {}).get("device_id")
             )
+            cust = data_object.get("customer") or ""
+            sub = data_object.get("subscription") or ""
             if device_id:
-                billing_db.grant_pro(device_id, tier="pro", note=f"Stripe Webhook: {event_type}")
-                logger.info(f"Stripe Webhook successfully upgraded device '{device_id}' to PRO!")
+                billing_db.grant_pro(
+                    device_id,
+                    tier="pro",
+                    note=f"Webhook: {event_type}",
+                    stripe_customer_id=cust,
+                    stripe_subscription_id=sub,
+                )
+                logger.info(f"Webhook successfully upgraded device '{device_id}' to PRO!")
+
+        elif event_type == "customer.subscription.deleted":
+            data_object = event.get("data", {}).get("object", {})
+            sub_id = data_object.get("id")
+            if sub_id:
+                billing_db.cancel_subscription_by_sub_id(sub_id, note="Subscription expired/deleted via webhook")
+                logger.info(f"Webhook marked subscription {sub_id} as deleted")
+
+        elif event_type == "customer.subscription.updated":
+            data_object = event.get("data", {}).get("object", {})
+            sub_id = data_object.get("id")
+            cancel_at_period_end = data_object.get("cancel_at_period_end", False)
+            if sub_id:
+                billing_db.sync_subscription_status_by_sub_id(sub_id, cancel_at_period_end)
+                logger.info(f"Webhook synced cancel_at_period_end={cancel_at_period_end} for sub {sub_id}")
 
         return {"status": "received"}
     except Exception as e:
@@ -961,7 +1284,7 @@ async def admin_grant_pro(req: GrantProRequest, request: Request):
     }
 
 
-@app.get("/audio/{filename}", summary="Stream or Download Rendered Audio File")
+@app.api_route("/audio/{filename}", methods=["GET", "HEAD"], summary="Stream or Download Rendered Audio File")
 async def get_audio_file(filename: str):
     """
     Stream or download generated audio file from the output directory with CORS headers.
@@ -1012,6 +1335,360 @@ async def list_presets():
 
 
 # ============================================================================
+# OpenAI-Compatible Speech API & Developer Platform Endpoints
+# ============================================================================
+
+def extract_api_key(request: Request) -> Optional[str]:
+    """Extracts API key from Authorization header ('Bearer sk_...') or 'X-API-Key'."""
+    auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    api_key_header = request.headers.get("X-API-Key") or request.headers.get("x-api-key")
+    if api_key_header:
+        return api_key_header.strip()
+    return None
+
+
+# ============================================================================
+# Anti-DDoS Rate Limiting & Cooldown Engine
+# ============================================================================
+
+FREE_TIER_API_DELAY_SECONDS = 5.0  # Enforced spacing between consecutive calls for free tier
+
+class AntiDDoSRateLimiter:
+    """
+    In-memory concurrency and pacing rate-limiter for free-tier API calls.
+    Prevents DDoS, bot flooding, and model worker thread exhaustion.
+    """
+
+    def __init__(self, free_delay_seconds: float = FREE_TIER_API_DELAY_SECONDS):
+        self.free_delay_seconds = free_delay_seconds
+        self._active_requests: set[str] = set()
+        self._last_call_timestamps: dict[str, float] = {}
+        self._lock = asyncio.Lock()
+
+    async def check_and_acquire(self, identifier: str, is_pro: bool = False) -> float:
+        """
+        Enforces:
+          1. Concurrency limit: Maximum 1 active request at a time for Free tier callers.
+             Immediate HTTP 429 if another request is in-flight.
+          2. Minimum interval delay: Calculates wait time so that consecutive requests
+             have at least `self.free_delay_seconds` spacing.
+        Returns the delay (in seconds) to await before synthesis.
+        """
+        if is_pro:
+            return 0.0
+
+        async with self._lock:
+            # Clean up old timestamps periodically
+            if len(self._last_call_timestamps) > 5000:
+                cutoff = time.time() - 3600.0
+                self._last_call_timestamps = {
+                    k: v for k, v in self._last_call_timestamps.items() if v > cutoff
+                }
+
+            # 1. Concurrency check: Reject parallel requests immediately with 429
+            if identifier in self._active_requests:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "error": {
+                            "message": (
+                                "Too many concurrent requests. Free tier is strictly limited to 1 active request at a time. "
+                                "Please wait for your active request to complete or upgrade to Pro for high-concurrency access."
+                            ),
+                            "type": "rate_limit_error",
+                            "param": None,
+                            "code": "concurrent_request_limit",
+                        }
+                    },
+                    headers={"Retry-After": str(int(self.free_delay_seconds))},
+                )
+
+            # 2. Pacing delay: Ensure minimum delay between 2 API calls
+            now = time.time()
+            last_time = self._last_call_timestamps.get(identifier, 0.0)
+            elapsed = now - last_time
+            required_wait = max(0.0, self.free_delay_seconds - elapsed)
+
+            # Mark identifier as active so incoming concurrent requests get 429
+            self._active_requests.add(identifier)
+            return required_wait
+
+    async def release(self, identifier: str, is_pro: bool = False) -> None:
+        """Removes the active lock and updates the completion timestamp."""
+        if is_pro:
+            return
+        async with self._lock:
+            self._active_requests.discard(identifier)
+            self._last_call_timestamps[identifier] = time.time()
+
+
+api_rate_limiter = AntiDDoSRateLimiter(free_delay_seconds=FREE_TIER_API_DELAY_SECONDS)
+
+
+@app.get("/v1/models", summary="OpenAI-Compatible Model List")
+async def openai_list_models():
+    """
+    Returns an OpenAI-compatible list of models so tools/SDKs expecting OpenAI
+    can query models without errors.
+    """
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": "kokoro",
+                "object": "model",
+                "created": 1700000000,
+                "owned_by": "kokoro-studio",
+                "permission": [],
+                "root": "kokoro",
+                "parent": None,
+            },
+            {
+                "id": "kokoro-82m",
+                "object": "model",
+                "created": 1700000000,
+                "owned_by": "kokoro-studio",
+                "permission": [],
+                "root": "kokoro-82m",
+                "parent": None,
+            },
+            {
+                "id": "tts-1",
+                "object": "model",
+                "created": 1700000000,
+                "owned_by": "kokoro-studio",
+                "permission": [],
+                "root": "tts-1",
+                "parent": None,
+            },
+            {
+                "id": "tts-1-hd",
+                "object": "model",
+                "created": 1700000000,
+                "owned_by": "kokoro-studio",
+                "permission": [],
+                "root": "tts-1-hd",
+                "parent": None,
+            },
+        ],
+    }
+
+
+@app.post("/v1/audio/speech", summary="OpenAI-Compatible Text-to-Speech Endpoint")
+async def openai_audio_speech(req: OpenAISpeechRequest, request: Request):
+    """
+    Drop-in OpenAI-compatible speech synthesis endpoint.
+    Accepts standard OpenAI TTS parameters (`model`, `input`, `voice`, `response_format`, `speed`)
+    and returns raw binary audio (audio/mpeg or audio/wav).
+    
+    Protected by Bearer token authentication (`sk_live_kokoro_...`), character quota tracking,
+    and anti-DDoS pacing/concurrency limits for free-tier users.
+    """
+    # 1. Authenticate API Key
+    api_key = extract_api_key(request)
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": {
+                    "message": "Missing API key. Pass your secret key in the Authorization header: 'Bearer sk_live_kokoro_...'",
+                    "type": "invalid_request_error",
+                    "param": None,
+                    "code": "missing_api_key",
+                }
+            },
+        )
+
+    text_len = len(req.input or "")
+    if text_len == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "message": "'input' text must not be empty.",
+                    "type": "invalid_request_error",
+                    "param": "input",
+                    "code": "empty_input",
+                }
+            },
+        )
+
+    # Validate API key authenticity and tier
+    is_valid, key_data, auth_err = billing_db.authenticate_api_key(api_key)
+    if not is_valid or not key_data:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": {
+                    "message": auth_err or "Invalid or revoked API key.",
+                    "type": "invalid_request_error",
+                    "param": None,
+                    "code": "invalid_api_key",
+                }
+            },
+        )
+
+    key_id = key_data["key_id"]
+    tier = key_data.get("tier", "free")
+    is_pro = (tier == "pro")
+
+    # Enforce anti-DDoS concurrency limit & 5-second pacing delay for Free Tier
+    wait_seconds = await api_rate_limiter.check_and_acquire(key_id, is_pro=is_pro)
+
+    try:
+        if wait_seconds > 0:
+            logger.info(f"Enforcing anti-DDoS delay of {wait_seconds:.2f}s for free API key {key_id}")
+            await asyncio.sleep(wait_seconds)
+
+        client_ip = request.headers.get("x-forwarded-for") or (request.client.host if request.client else "")
+
+        allowed, quota_info, quota_msg = billing_db.check_and_consume_api_key_quota(
+            api_key=api_key,
+            char_count=text_len,
+            client_ip=client_ip,
+            voice_id=req.voice,
+        )
+
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "error": {
+                        "message": quota_msg,
+                        "type": "insufficient_quota",
+                        "param": None,
+                        "code": "quota_exceeded",
+                        "quota": quota_info,
+                    }
+                },
+            )
+
+        # 2. Voice mapping & normalization
+        target_voice = req.voice
+        openai_voice_map = {
+            "alloy": "am_adam",
+            "echo": "am_michael",
+            "fable": "bm_george",
+            "onyx": "am_fenrir",
+            "nova": "af_bella",
+            "shimmer": "af_sarah",
+        }
+        if target_voice in openai_voice_map:
+            target_voice = openai_voice_map[target_voice]
+        elif target_voice not in VOICE_CATALOG:
+            target_voice = "af_bella"
+
+        # 3. Format mapping
+        fmt = req.response_format.lower().strip()
+        output_format = "mp3" if fmt in ("mp3", "aac", "opus", "flac") else "wav"
+
+        # 4. Synthesize via async worker
+        render_payload = {
+            "text": req.input,
+            "voice_id": target_voice,
+            "speed": float(req.speed),
+            "eq_preset": req.eq_preset or "Clean Studio (Default)",
+            "lang": req.lang or "auto",
+            "output_format": output_format,
+            "pause_punctuation_ms": req.pause_punctuation_ms or 150,
+            "pause_paragraph_ms": req.pause_paragraph_ms or 400,
+        }
+
+        dynamic_timeout = max(600.0, float(text_len * 4.0))
+        result = await engine_manager.render_async(render_payload, timeout_sec=dynamic_timeout)
+
+        file_path = Path(result["audio_path"])
+        if not file_path.exists():
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Generated audio file not found")
+
+        media_type = "audio/mpeg" if output_format == "mp3" else "audio/wav"
+
+        return FileResponse(
+            path=str(file_path),
+            media_type=media_type,
+            headers={
+                "Content-Type": media_type,
+                "OpenAI-Model": req.model,
+                "X-Kokoro-Voice": target_voice,
+                "X-Audio-Duration": str(result["duration"]),
+                "X-Characters-Consumed": str(text_len),
+                "X-Quota-Remaining": str(quota_info.get("remaining_chars", "unlimited")),
+                "X-RateLimit-Delay-Seconds": "0" if is_pro else str(int(FREE_TIER_API_DELAY_SECONDS)),
+                "X-RateLimit-Tier": tier,
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+    finally:
+        await api_rate_limiter.release(key_id, is_pro=is_pro)
+
+
+@app.get("/v1/audio/voices", summary="OpenAI-Compatible Voice Catalog")
+async def openai_audio_voices():
+    """Returns all 60 supported Kokoro voices formatted for developers."""
+    voices = []
+    for vid, vdata in VOICE_CATALOG.items():
+        voices.append({
+            "voice_id": vid,
+            "name": vdata.get("name", vid),
+            "gender": vdata.get("gender", "neutral"),
+            "language": vdata.get("lang_name", "English"),
+            "language_code": vdata.get("lang", "en-us"),
+            "flag": vdata.get("flag", "🌐"),
+            "description": vdata.get("description", ""),
+        })
+    return {"object": "list", "voices": voices}
+
+
+@app.post("/v1/developer/keys", summary="Generate New API Key for Device")
+async def create_developer_key(req: CreateApiKeyRequest, request: Request):
+    """Generates a secure API key bound to the device's monthly quota."""
+    dev_id = req.device_id or request.headers.get("x-device-id") or "dev_anonymous"
+    try:
+        return billing_db.create_api_key(device_id=dev_id, name=req.name)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": {
+                    "message": str(e),
+                    "type": "permission_error",
+                    "code": "api_key_limit_reached",
+                }
+            },
+        )
+
+
+@app.get("/v1/developer/keys", summary="List Developer API Keys for Device")
+async def list_developer_keys(request: Request, device_id: Optional[str] = None):
+    """Lists all active API keys and current quota status for a device."""
+    dev_id = device_id or request.headers.get("x-device-id") or "dev_anonymous"
+    keys = billing_db.list_api_keys(device_id=dev_id)
+    quota = billing_db.get_device_quota(device_id=dev_id)
+    is_pro = quota.get("tier") == "pro"
+    max_keys = 50 if is_pro else 1
+    return {
+        "device_id": dev_id,
+        "quota": quota,
+        "keys": keys,
+        "max_keys": max_keys,
+        "can_create_key": is_pro or len(keys) < 1,
+    }
+
+
+@app.delete("/v1/developer/keys/{key_id}", summary="Revoke Developer API Key")
+async def revoke_developer_key(key_id: str, request: Request, device_id: Optional[str] = None):
+    """Revokes an API key so it can no longer be used."""
+    dev_id = device_id or request.headers.get("x-device-id") or "dev_anonymous"
+    success = billing_db.revoke_api_key(device_id=dev_id, key_id=key_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="API key not found or already revoked")
+    return {"success": True, "message": "API key revoked successfully"}
+
+
+
+# ============================================================================
 # Static Frontend SPA Mounting (Serves React 19 UI Bundle)
 # ============================================================================
 
@@ -1019,6 +1696,9 @@ if FRONTEND_DIST.exists():
     assets_dir = FRONTEND_DIST / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="static-assets")
+    flags_dir = FRONTEND_DIST / "flags"
+    if flags_dir.exists():
+        app.mount("/flags", StaticFiles(directory=str(flags_dir)), name="static-flags")
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="static-root")
 
 

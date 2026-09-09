@@ -1,20 +1,33 @@
 FROM python:3.11-slim
 
+# Set up non-root user with UID 1000 required by Hugging Face Spaces
+RUN useradd -m -u 1000 user
+
 WORKDIR /app
 
-# Install system dependencies (espeak-ng and ffmpeg for audio synthesis & processing)
+# Install system audio dependencies (espeak-ng for phonemizer & ffmpeg for audio rendering)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     espeak-ng \
     ffmpeg \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt uvicorn fastapi soundfile numpy kokoro-onnx
+RUN pip install --no-cache-dir -r requirements.txt uvicorn fastapi soundfile numpy kokoro-onnx pydub
 
-COPY . .
+# Copy app files and grant permissions to user
+COPY --chown=user:user . .
 
-ENV PORT=8000
-EXPOSE 8000
+# Ensure data directory exists with write permissions for SQLite billing database
+RUN mkdir -p /app/data /app/output /app/assets/kokoro && chown -R user:user /app
 
-CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000}"]
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH \
+    PORT=7860 \
+    HOST=0.0.0.0
+
+EXPOSE 7860
+
+CMD ["python", "server.py"]

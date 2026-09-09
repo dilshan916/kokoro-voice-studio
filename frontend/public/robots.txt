@@ -1,0 +1,9 @@
+User-agent: Mediapartners-Google
+Allow: /
+
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /v1/billing/
+
+Sitemap: https://partly-congress-chest-periods.trycloudflare.com/sitemap.xml
