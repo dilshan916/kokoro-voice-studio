@@ -16,7 +16,7 @@ const SAMPLE_PROMPTS = [
   '日本語の音声合成も極めて自然で、感情豊かなナレーションが可能です。',
 ];
 
-export const GenerationCanvas: React.FC<GenerationCanvasProps> = ({
+export const GenerationCanvas: React.FC<GenerationCanvasProps> = React.memo(({
   text,
   onChangeText,
   onConvert,
@@ -101,5 +101,5 @@ export const GenerationCanvas: React.FC<GenerationCanvasProps> = ({
       </div>
     </div>
   );
-};
+});
 export default GenerationCanvas;

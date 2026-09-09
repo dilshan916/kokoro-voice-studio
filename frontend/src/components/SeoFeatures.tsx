@@ -40,12 +40,12 @@ const FEATURES = [
   },
 ];
 
-export const SeoFeatures: React.FC = () => {
+export const SeoFeatures: React.FC = React.memo(() => {
   return (
     <section className="max-w-4xl mx-auto w-full py-10 px-2 select-none">
       <div className="text-center mb-8">
         <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight mb-2">
-          Why Creators Choose Kokoro Voice Studio
+          Everything You Need For Studio-Grade AI Audio
         </h2>
         <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 max-w-xl mx-auto">
           The ultimate cloud-powered neural audio workstation designed for content creators, podcasters, video editors, and game developers.
@@ -74,5 +74,5 @@ export const SeoFeatures: React.FC = () => {
       </div>
     </section>
   );
-};
+});
 export default SeoFeatures;

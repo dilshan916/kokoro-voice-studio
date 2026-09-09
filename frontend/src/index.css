@@ -80,3 +80,47 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow: 0 0 10px rgba(99, 102, 241, 0.8);
   border: 2px solid #ffffff;
 }
+
+/* Mobile Performance & Smooth Scrolling Optimizations */
+@media (max-width: 768px) {
+  /* Disable expensive real-time GPU blur convolutions on mobile screens */
+  .backdrop-blur-2xl,
+  .backdrop-blur-xl,
+  .backdrop-blur-md,
+  .backdrop-blur-sm,
+  .backdrop-blur {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  /* Make background surfaces solid on mobile to eliminate composite repaint lag */
+  .bg-white\/80,
+  .bg-white\/70,
+  .bg-white\/60,
+  .bg-white\/90,
+  .bg-white\/95 {
+    background-color: #ffffff !important;
+  }
+
+  .dark .dark\:bg-slate-800\/80,
+  .dark .dark\:bg-slate-800\/70,
+  .dark .dark\:bg-slate-800\/90,
+  .dark .dark\:bg-slate-800\/95,
+  .dark .dark\:bg-slate-900\/80,
+  .dark .dark\:bg-slate-900\/70,
+  .dark .dark\:bg-slate-900\/90,
+  .dark .dark\:bg-slate-900\/95 {
+    background-color: #0f172a !important;
+  }
+
+  /* Smooth 60-120Hz momentum scrolling on mobile */
+  html, body {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: none;
+  }
+
+  /* Eliminate mobile tap delay */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}

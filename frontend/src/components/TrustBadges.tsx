@@ -1,7 +1,7 @@
 import React from 'react';
 import { Zap, ShieldCheck, Cloud } from 'lucide-react';
 
-export const TrustBadges: React.FC = () => {
+export const TrustBadges: React.FC = React.memo(() => {
   return (
     <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-10 py-6 text-xs text-slate-500 dark:text-slate-400 select-none">
       <div className="flex items-center gap-2">
@@ -24,5 +24,5 @@ export const TrustBadges: React.FC = () => {
       </div>
     </div>
   );
-};
+});
 export default TrustBadges;

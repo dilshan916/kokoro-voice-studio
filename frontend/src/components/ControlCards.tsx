@@ -13,7 +13,7 @@ interface ControlCardsProps {
   presets: string[];
 }
 
-export const ControlCards: React.FC<ControlCardsProps> = ({
+export const ControlCards: React.FC<ControlCardsProps> = React.memo(({
   selectedVoice,
   onOpenVoiceModal,
   speed,
@@ -143,5 +143,5 @@ export const ControlCards: React.FC<ControlCardsProps> = ({
       </div>
     </div>
   );
-};
+});
 export default ControlCards;

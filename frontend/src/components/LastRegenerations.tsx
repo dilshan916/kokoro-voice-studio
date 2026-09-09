@@ -13,7 +13,7 @@ interface LastRegenerationsProps {
   playbackProgress: number; // 0.0 to 1.0
 }
 
-export const LastRegenerations: React.FC<LastRegenerationsProps> = ({
+export const LastRegenerations: React.FC<LastRegenerationsProps> = React.memo(({
   history,
   onClearHistory,
   activeTrackId,
@@ -22,7 +22,12 @@ export const LastRegenerations: React.FC<LastRegenerationsProps> = ({
   isPlaying,
   playbackProgress,
 }) => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 640;
+    }
+    return false;
+  });
   const [downloadedId, setDownloadedId] = useState<string | null>(null);
 
   if (history.length === 0) {
@@ -58,8 +63,8 @@ export const LastRegenerations: React.FC<LastRegenerationsProps> = ({
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-80 sm:w-96 select-none shadow-2xl transition-all">
-      <div className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-2xl border border-blue-100 dark:border-slate-700/80 rounded-3xl p-4 shadow-xl shadow-slate-900/10 dark:shadow-black/40">
+    <div className="fixed bottom-3 right-3 left-3 sm:left-auto sm:right-4 sm:bottom-4 z-40 sm:w-96 select-none shadow-2xl transition-all will-change-transform">
+      <div className="bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl border border-blue-100 dark:border-slate-700/80 rounded-2xl sm:rounded-3xl p-3.5 sm:p-4 shadow-xl shadow-slate-900/10 dark:shadow-black/40">
         {/* Widget Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700/60">
           <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
@@ -181,5 +186,5 @@ export const LastRegenerations: React.FC<LastRegenerationsProps> = ({
       </div>
     </div>
   );
-};
+});
 export default LastRegenerations;

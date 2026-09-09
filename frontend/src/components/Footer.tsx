@@ -9,7 +9,7 @@ interface FooterProps {
   onOpenLegal: (docId: LegalDocId) => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({
+export const Footer: React.FC<FooterProps> = React.memo(({
   onOpenVoices,
   onOpenPricing,
   onOpenDevelopers,
@@ -217,5 +217,5 @@ export const Footer: React.FC<FooterProps> = ({
       </div>
     </footer>
   );
-};
+});
 export default Footer;

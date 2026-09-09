@@ -29,7 +29,7 @@ const FAQS = [
   },
 ];
 
-export const SeoFaq: React.FC = () => {
+export const SeoFaq: React.FC = React.memo(() => {
   const [openIndex, setOpenIndex] = useState<number | null>(0);
 
   return (
@@ -77,5 +77,5 @@ export const SeoFaq: React.FC = () => {
       </div>
     </section>
   );
-};
+});
 export default SeoFaq;

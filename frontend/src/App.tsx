@@ -181,9 +181,14 @@ export const App: React.FC = () => {
       setPlaybackProgress(0);
     };
 
+    let lastProgressUpdate = 0;
     audio.ontimeupdate = () => {
-      if (audio.duration) {
-        setPlaybackProgress(audio.currentTime / audio.duration);
+      const now = performance.now();
+      if (now - lastProgressUpdate > 120) {
+        lastProgressUpdate = now;
+        if (audio.duration) {
+          setPlaybackProgress(audio.currentTime / audio.duration);
+        }
       }
     };
 

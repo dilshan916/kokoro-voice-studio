@@ -1,6 +1,6 @@
 import React from 'react';
 
-export const HeroSection: React.FC = () => {
+export const HeroSection: React.FC = React.memo(() => {
   return (
     <section className="text-center pt-8 pb-6 px-4 max-w-3xl mx-auto select-none">
       {/* Main Title */}
@@ -14,5 +14,5 @@ export const HeroSection: React.FC = () => {
       </p>
     </section>
   );
-};
+});
 export default HeroSection;
