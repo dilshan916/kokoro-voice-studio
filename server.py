@@ -969,14 +969,8 @@ async def redeem_license(req: RedeemLicenseRequest):
     }
 
 
-STRIPE_SECRET_KEY = os.environ.get(
-    "STRIPE_SECRET_KEY",
-    "",
-)
-STRIPE_PRICE_ID = os.environ.get(
-    "STRIPE_PRICE_ID",
-    "",
-)
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")
 
 
 @app.post("/v1/billing/create-checkout-session", summary="Generate Stripe Checkout Link")
