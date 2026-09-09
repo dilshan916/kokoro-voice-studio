@@ -35,7 +35,7 @@ export interface LegalConfig {
 export const LEGAL_CONFIG: LegalConfig = {
   companyName: 'Alpha Creations',
   serviceName: 'Kokoro Voice Studio',
-  websiteUrl: typeof window !== 'undefined' ? window.location.origin : 'https://partly-congress-chest-periods.trycloudflare.com',
+  websiteUrl: typeof window !== 'undefined' ? window.location.origin : 'https://saytts.site',
   supportEmail: 'madushankamax8@gmail.com',
   privacyEmail: 'madushankamax8@gmail.com',
   dmcaEmail: 'madushankamax8@gmail.com',

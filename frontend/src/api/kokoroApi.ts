@@ -1,14 +1,14 @@
 import axios from 'axios';
 import { HealthData, RenderRequest, RenderResponse, UserQuota } from '../types';
 
-export const DEFAULT_CLOUD_VPS_URL = 'https://partly-congress-chest-periods.trycloudflare.com';
+export const DEFAULT_CLOUD_VPS_URL = 'https://saytts.site';
 export const LOCAL_DEV_URL = 'http://127.0.0.1:8000';
 
 /**
  * Resolve active API Base URL:
  * 1. User manual override in localStorage ('kokoro_api_url')
  * 2. If app is hosted directly on VPS or localhost:8000, use window.location.origin
- * 3. Default to public Cloudflare HTTPS tunnel to Oracle Cloud VPS
+ * 3. Default to public HTTPS domain
  */
 export function getApiBaseUrl(): string {
   if (typeof window === 'undefined') return DEFAULT_CLOUD_VPS_URL;
@@ -20,6 +20,7 @@ export function getApiBaseUrl(): string {
 
   const origin = window.location.origin || '';
   if (
+    origin.includes('saytts.site') ||
     origin.includes('trycloudflare.com') ||
     origin.includes('161.118.193.63') ||
     origin.includes(':8000')
