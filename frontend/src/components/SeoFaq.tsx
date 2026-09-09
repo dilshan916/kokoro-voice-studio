@@ -10,7 +10,7 @@ const FAQS = [
   {
     question: 'Is Kokoro Voice Studio free to use?',
     answer:
-      'Yes! Kokoro Voice Studio includes a generous free monthly quota of 20,000 characters with complete access to all 60 voices, audio mastering presets, and SRT subtitle export. Users can also upgrade to Unlimited Pro with VIP codes.',
+      'Yes! Kokoro Voice Studio includes a generous free monthly quota of 30,000 characters with complete access to all 60 voices, audio mastering presets, and SRT subtitle export. Users can also upgrade to Unlimited Pro with VIP codes.',
   },
   {
     question: 'Can I use generated speech for YouTube, TikTok, and Podcasts?',

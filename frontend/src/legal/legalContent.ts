@@ -114,7 +114,7 @@ export const ALL_LEGAL_DOCS: LegalDocument[] = [
         id: 'payments',
         title: '6. Billing, Payments & Secure Checkout',
         content: [
-          `The application provides a complimentary free monthly quota of 20,000 characters per device. Users may optionally upgrade to the Pro Unlimited plan ($9.99/month) or redeem promotional VIP license codes to unlock unlimited character allowances.`,
+          `The application provides a complimentary free monthly quota of 30,000 characters per device. Users may optionally upgrade to the Pro Unlimited plan ($9.99/month) or redeem promotional VIP license codes to unlock unlimited character allowances.`,
           `Secure Payment Processing: All subscription payments and credit card transactions are handled exclusively by a certified PCI-DSS Level 1 payment processor. When upgrading, you are redirected to a secure hosted checkout page.`,
           `Zero Card Data Stored: We never collect, transmit, or store your credit card numbers, CVVs, expiration dates, or bank details on our servers. All financial transactions and payment instrument tokens remain strictly within the payment processor's encrypted infrastructure.`,
           `Device-Bound Entitlements: Upon successful payment confirmation via the secure checkout gateway or webhooks, your unique anonymous Device ID is automatically granted Pro Unlimited status without requiring account registration.`,
@@ -195,7 +195,7 @@ export const ALL_LEGAL_DOCS: LegalDocument[] = [
         id: 'quotas-usage',
         title: '4. Character Quotas, Free Tier & Pro Features',
         content: [
-          `Free Tier: Each device receives a complimentary quota of 20,000 characters per calendar month. This character allocation automatically resets on the first day of each UTC calendar month. Unused characters do not roll over.`,
+          `Free Tier: Each device receives a complimentary quota of 30,000 characters per calendar month. This character allocation automatically resets on the first day of each UTC calendar month. Unused characters do not roll over.`,
           `Pro Tier: Devices with an active Pro status (unlocked via promotional passcodes, VIP keys, or authorized licenses) receive unlimited character generation subject to fair use and system stability requirements.`,
           `Quota Calculation: Quotas are decremented based on the character length of the input text submitted in each synthesis request. We reserve the right to modify quota limits and usage tiers at our discretion.`,
         ],
@@ -621,7 +621,7 @@ export const ALL_LEGAL_DOCS: LegalDocument[] = [
         id: 'free-quota-terms',
         title: '2. Free Monthly Quotas & Reset Rules',
         content: [
-          `Every device receives a complimentary quota of 20,000 characters per calendar month.`,
+          `Every device receives a complimentary quota of 30,000 characters per calendar month.`,
           `Monthly Reset: Quota usage resets automatically on the first day of each UTC calendar month. Unused characters from a prior month do not carry forward, accrue, or convert to cash equivalents.`,
         ],
       },
@@ -640,7 +640,7 @@ export const ALL_LEGAL_DOCS: LegalDocument[] = [
           `Monthly Subscription Terms: Kokoro Voice Studio Pro is billed at $9.99 USD per month in advance on a recurring monthly schedule.`,
           `• Subscription Cancellation: You may cancel recurring billing at any time by contacting our support team or through your payment link. Upon cancellation, your Pro benefits remain active until the end of the paid billing month.`,
           `• 14-Day Refund Evaluation: If you experience persistent technical defects, service interruptions, or unintended billing, you may request a refund within fourteen (14) days of the billing charge by reaching out to support with your Device ID or checkout confirmation.`,
-          `• Failed Renewals: If a scheduled recurring payment cannot be completed, access will gracefully return to the standard free monthly tier (20,000 characters/month).`,
+          `• Failed Renewals: If a scheduled recurring payment cannot be completed, access will gracefully return to the standard free monthly tier (30,000 characters/month).`,
         ],
       },
       {

@@ -4,7 +4,7 @@ Kokoro Voice Studio Pro — Billing, Quota & Anonymous Device Management DB
 Persistent SQLite database handling:
   - Anonymous Device ID registry (zero-login)
   - Anti-Uninstall / Anti-Reset protection via Hardware & Network Fingerprinting
-  - 20,000 characters/month Free Tier enforcement (resets automatically each month)
+  - 30,000 characters/month Free Tier enforcement (resets automatically each month)
   - Pro Plan (Unlimited) tier management
   - Promo / VIP License key generation & instant in-app redemption
   - Stripe Customer & Subscription metadata binding
@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("kokoro.billing")
 
-DEFAULT_FREE_MONTHLY_LIMIT = 20000
+DEFAULT_FREE_MONTHLY_LIMIT = 30000
 
 
 class BillingDB:
@@ -61,7 +61,7 @@ class BillingDB:
                     client_ip TEXT,
                     tier TEXT NOT NULL DEFAULT 'free',
                     monthly_usage INTEGER NOT NULL DEFAULT 0,
-                    monthly_limit INTEGER NOT NULL DEFAULT 20000,
+                    monthly_limit INTEGER NOT NULL DEFAULT 30000,
                     billing_cycle_month TEXT NOT NULL,
                     license_key TEXT,
                     stripe_customer_id TEXT,
@@ -149,7 +149,7 @@ class BillingDB:
                     name TEXT NOT NULL DEFAULT 'Default API Key',
                     tier TEXT NOT NULL DEFAULT 'free',
                     monthly_usage INTEGER NOT NULL DEFAULT 0,
-                    monthly_limit INTEGER NOT NULL DEFAULT 20000,
+                    monthly_limit INTEGER NOT NULL DEFAULT 30000,
                     billing_cycle_month TEXT NOT NULL,
                     is_active INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
@@ -159,6 +159,13 @@ class BillingDB:
             )
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_token ON api_keys(api_key)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_device ON api_keys(device_id)")
+
+            # Automatic migration: bump legacy 20,000 monthly limit to 30,000
+            try:
+                cursor.execute("UPDATE devices SET monthly_limit = 30000 WHERE tier = 'free' AND monthly_limit = 20000")
+                cursor.execute("UPDATE api_keys SET monthly_limit = 30000 WHERE tier = 'free' AND monthly_limit = 20000")
+            except Exception as mig_lim_err:
+                logger.warning(f"Limit migration warning: {mig_lim_err}")
 
             conn.commit()
 

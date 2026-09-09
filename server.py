@@ -843,7 +843,7 @@ async def health_check():
 async def render_audio(req: RenderRequest, request: Request, response: Response):
     """
     Synthesize input text into speech with selected voice, speed, language, and EQ mastering preset.
-    Enforces 20,000 characters/month for free-tier devices while granting unlimited access to Pro devices.
+    Enforces 30,000 characters/month for free-tier devices while granting unlimited access to Pro devices.
     """
     # 1. Device identification, fingerprinting & monthly quota enforcement
     device_id = (

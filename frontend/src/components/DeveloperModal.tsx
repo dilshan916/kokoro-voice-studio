@@ -368,7 +368,7 @@ else:
                   <div className="text-base font-extrabold text-slate-900 dark:text-white">
                     {quota?.tier === 'pro'
                       ? 'Unlimited'
-                      : `${((quota?.monthly_limit || 20000) - (quota?.monthly_usage || 0)).toLocaleString()} chars`}
+                      : `${((quota?.monthly_limit || 30000) - (quota?.monthly_usage || 0)).toLocaleString()} chars`}
                   </div>
                 </div>
               </div>

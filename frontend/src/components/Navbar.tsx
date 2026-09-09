@@ -144,7 +144,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="text-[11px] text-slate-500 dark:text-slate-400">
                     {isPro
                       ? 'Enjoy unlimited speech generations'
-                      : `${quota?.monthly_usage || 0} / 20,000 characters used`}
+                      : `${(quota?.monthly_usage || 0).toLocaleString()} / ${(quota?.monthly_limit || 30000).toLocaleString()} characters used`}
                   </div>
                 </div>
 

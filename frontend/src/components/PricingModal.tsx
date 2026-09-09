@@ -41,7 +41,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
 
   const isPro = quota?.tier === 'pro';
   const usage = quota?.monthly_usage || 0;
-  const limit = quota?.monthly_limit || 20000;
+  const limit = quota?.monthly_limit || 30000;
   const usagePercent = limit > 0 ? Math.min(100, Math.round((usage / limit) * 100)) : 0;
 
   const formatExpiryDate = (isoStr?: string) => {
@@ -209,7 +209,7 @@ export const PricingModal: React.FC<PricingModalProps> = ({
               <ul className="space-y-2 text-xs font-medium text-slate-600 dark:text-slate-300">
                 <li className="flex items-center gap-2">
                   <Check className="w-4 h-4 text-emerald-500 shrink-0" strokeWidth={2.5} />
-                  <span>20,000 characters / month</span>
+                  <span>30,000 characters / month</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <Check className="w-4 h-4 text-emerald-500 shrink-0" strokeWidth={2.5} />
