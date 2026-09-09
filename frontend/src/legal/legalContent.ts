@@ -519,7 +519,7 @@ export const ALL_LEGAL_DOCS: LegalDocument[] = [
           `• "kokoro_theme": Stores your visual display preference ("light" or "dark"). Stored locally on your device indefinitely until cleared.`,
           `• "kokoro_device_id": Stores your random anonymous device identifier (e.g., "dev_web_xxxxxxxxxxxxxxxx"). Used to query and track your monthly character quota and associate Developer API keys.`,
           `• "kokoro_history": Stores a local JSON array of your up to 20 most recent speech generations (titles, timestamps, audio object URLs, and subtitle texts) on your device. You can erase this data at any time via the "Clear History" button.`,
-          `• "kokoro_api_url": Stores an optional custom backend server URL if you choose to override the default cloud endpoint in the Server Settings modal.`,
+          `• "kokoro_api_url": Stores an optional custom backend server URL if you choose to configure a custom endpoint via developer configuration.`,
           `LocalStorage data never leaves your browser unless an identifier is transmitted in request headers (e.g., X-Device-Id) to perform a requested server action.`,
         ],
       },
