@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sun, Moon, ChevronDown, Server, Smartphone, Terminal } from 'lucide-react';
+import { Sun, Moon, Server, Smartphone, Terminal, Menu } from 'lucide-react';
 import { HealthData, UserQuota } from '../types';
 
 interface NavbarProps {
@@ -108,22 +108,22 @@ export const Navbar: React.FC<NavbarProps> = ({
             {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
           </button>
 
-          {/* User Profile Avatar with Dropdown */}
+          {/* Three-Line Menu Dropdown */}
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-              className="flex items-center gap-1.5 p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
+              className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white flex items-center justify-center transition-all cursor-pointer shadow-sm relative"
+              title="Menu"
+              aria-label="Toggle menu"
             >
-              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shadow-sm relative">
-                D
-                {/* Online Status Dot */}
-                <span
-                  className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${
-                    isOnline ? 'bg-emerald-500' : 'bg-rose-500'
-                  }`}
-                />
-              </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              <Menu className="w-4 h-4 text-white" />
+              {/* Online Status Dot */}
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${
+                  isOnline ? 'bg-emerald-500' : 'bg-rose-500'
+                }`}
+                title={isOnline ? 'Online' : 'Offline'}
+              />
             </button>
 
             {/* Dropdown Menu */}
