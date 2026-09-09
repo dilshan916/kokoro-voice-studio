@@ -1,6 +1,6 @@
 import React from 'react';
 import { Github, Smartphone, Heart, Shield, ExternalLink } from 'lucide-react';
-import { LegalDocId, LEGAL_CONFIG } from '../legal/legalContent';
+import { LegalDocId, LEGAL_CONFIG } from '../legal/legalConfig';
 
 interface FooterProps {
   onOpenVoices: () => void;
@@ -23,8 +23,11 @@ export const Footer: React.FC<FooterProps> = React.memo(({
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full overflow-hidden shadow-xs flex items-center justify-center bg-blue-600">
               <img
-                src="/favicon.png?v=round1"
+                src="/logo-96.webp"
                 alt="Kokoro Studio App Icon"
+                width="32"
+                height="32"
+                loading="lazy"
                 className="w-full h-full object-cover"
                 onError={(e) => {
                   (e.target as HTMLElement).style.display = 'none';

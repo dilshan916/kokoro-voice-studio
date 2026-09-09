@@ -16,48 +16,21 @@
  * 9. Placeholders: Clearly marked configuration tokens for unverified legal entity and contact details.
  */
 
-export interface LegalConfig {
-  companyName: string;
-  serviceName: string;
-  websiteUrl: string;
-  supportEmail: string;
-  privacyEmail: string;
-  dmcaEmail: string;
-  abuseEmail: string;
-  apiEmail: string;
-  legalAddress: string;
-  governingLaw: string;
-  effectiveDate: string;
-  lastUpdated: string;
-  githubUrl: string;
-}
+import {
+  type LegalDocId,
+  VALID_LEGAL_DOC_IDS,
+  isLegalDocId,
+  type LegalConfig,
+  LEGAL_CONFIG,
+} from './legalConfig';
 
-export const LEGAL_CONFIG: LegalConfig = {
-  companyName: 'Alpha Creations',
-  serviceName: 'Kokoro Voice Studio',
-  websiteUrl: typeof window !== 'undefined' ? window.location.origin : 'https://saytts.site',
-  supportEmail: 'madushankamax8@gmail.com',
-  privacyEmail: 'madushankamax8@gmail.com',
-  dmcaEmail: 'madushankamax8@gmail.com',
-  abuseEmail: 'madushankamax8@gmail.com',
-  apiEmail: 'madushankamax8@gmail.com',
-  legalAddress: 'Online Service / Remote Operator',
-  governingLaw: 'Applicable Local Laws',
-  effectiveDate: 'September 9, 2026',
-  lastUpdated: 'September 9, 2026',
-  githubUrl: 'https://github.com/dilshan916/kokoro-voice-studio',
+export {
+  type LegalDocId,
+  VALID_LEGAL_DOC_IDS,
+  isLegalDocId,
+  type LegalConfig,
+  LEGAL_CONFIG,
 };
-
-export type LegalDocId =
-  | 'privacy'
-  | 'terms'
-  | 'acceptable-use'
-  | 'ai-policy'
-  | 'cookies'
-  | 'dmca'
-  | 'refunds'
-  | 'about'
-  | 'contact';
 
 export interface LegalSection {
   id: string;

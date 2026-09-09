@@ -130,8 +130,10 @@ export const LegalCenter: React.FC<LegalCenterProps> = ({
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-full overflow-hidden shadow-xs flex items-center justify-center bg-blue-600 shrink-0">
                 <img
-                  src="/favicon.png?v=round1"
+                  src="/logo-96.webp"
                   alt="Kokoro Studio"
+                  width="32"
+                  height="32"
                   className="w-full h-full object-cover"
                   onError={(e) => {
                     (e.target as HTMLElement).style.display = 'none';

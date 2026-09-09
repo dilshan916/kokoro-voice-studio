@@ -5,17 +5,19 @@ import { ControlCards } from './components/ControlCards';
 import { GenerationCanvas } from './components/GenerationCanvas';
 import { TrustBadges } from './components/TrustBadges';
 import { LastRegenerations } from './components/LastRegenerations';
-import { VoiceModal } from './components/VoiceModal';
-import { PricingModal } from './components/PricingModal';
-import { DeveloperModal } from './components/DeveloperModal';
 import { SeoFeatures } from './components/SeoFeatures';
 import { SeoFaq } from './components/SeoFaq';
 import { Footer } from './components/Footer';
-import { LegalModal } from './components/LegalModal';
-import { LegalCenter } from './components/LegalCenter';
-import { LegalDocId, ALL_LEGAL_DOCS } from './legal/legalContent';
+import { LegalDocId, isLegalDocId } from './legal/legalConfig';
 import { kokoroApi } from './api/kokoroApi';
 import { Voice, HealthData, UserQuota, GenerationHistoryItem } from './types';
+
+// Lazy-loaded dialogs & Legal Center (keeps ~150KB out of initial homepage bundle)
+const VoiceModal = React.lazy(() => import('./components/VoiceModal').then((m) => ({ default: m.VoiceModal })));
+const PricingModal = React.lazy(() => import('./components/PricingModal').then((m) => ({ default: m.PricingModal })));
+const DeveloperModal = React.lazy(() => import('./components/DeveloperModal').then((m) => ({ default: m.DeveloperModal })));
+const LegalModal = React.lazy(() => import('./components/LegalModal').then((m) => ({ default: m.LegalModal })));
+const LegalCenter = React.lazy(() => import('./components/LegalCenter').then((m) => ({ default: m.LegalCenter })));
 
 const DEFAULT_INITIAL_VOICES: Voice[] = [
   { id: 'af_bella', name: 'Bella', gender: 'Female', lang: 'en-us', lang_name: 'English (US)', flag: '🇺🇸', description: 'Warm, expressive, high-retention narration' },
@@ -39,22 +41,19 @@ function parseLegalRoute(): { isLegal: boolean; docId: LegalDocId } {
   // Match /legal, /legal/privacy, /legal/terms, etc.
   if (pathname.startsWith('/legal')) {
     const sub = pathname.replace(/^\/legal\/?/, '').split('/')[0];
-    const match = ALL_LEGAL_DOCS.find((d) => d.id === sub);
-    return { isLegal: true, docId: match ? match.id : 'privacy' };
+    return { isLegal: true, docId: isLegalDocId(sub) ? sub : 'privacy' };
   }
 
   // Match #/legal/..., #legal/...
   if (hash.startsWith('#/legal') || hash.startsWith('#legal')) {
     const sub = hash.replace(/^#\/?legal\/?/, '').split('/')[0];
-    const match = ALL_LEGAL_DOCS.find((d) => d.id === sub);
-    return { isLegal: true, docId: match ? match.id : 'privacy' };
+    return { isLegal: true, docId: isLegalDocId(sub) ? sub : 'privacy' };
   }
 
   // Match direct hash: #privacy, #terms, etc.
   const directHash = hash.replace(/^#\/?/, '');
-  const directMatch = ALL_LEGAL_DOCS.find((d) => d.id === directHash);
-  if (directMatch) {
-    return { isLegal: true, docId: directMatch.id };
+  if (isLegalDocId(directHash)) {
+    return { isLegal: true, docId: directHash };
   }
 
   return { isLegal: false, docId: 'privacy' };
@@ -367,13 +366,24 @@ export const App: React.FC = () => {
   // Render Dedicated Full Legal Center if in legal view
   if (currentView === 'legal') {
     return (
-      <LegalCenter
-        initialDocId={activeLegalDoc}
-        onSelectDoc={navigateToLegal}
-        onBackToStudio={navigateToStudio}
-        isDarkMode={isDarkMode}
-        onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
-      />
+      <React.Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-500">
+            <div className="flex items-center gap-3">
+              <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+              <span>Loading Legal Documentation...</span>
+            </div>
+          </div>
+        }
+      >
+        <LegalCenter
+          initialDocId={activeLegalDoc}
+          onSelectDoc={navigateToLegal}
+          onBackToStudio={navigateToStudio}
+          isDarkMode={isDarkMode}
+          onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+        />
+      </React.Suspense>
     );
   }
 
@@ -482,38 +492,48 @@ export const App: React.FC = () => {
         playbackProgress={playbackProgress}
       />
 
-      {/* 4. Modals */}
-      <VoiceModal
-        isOpen={isVoiceModalOpen}
-        onClose={() => setIsVoiceModalOpen(false)}
-        voices={voices}
-        selectedVoiceId={selectedVoice.id}
-        onSelectVoice={setSelectedVoice}
-      />
+      {/* 4. Modals (Lazy Loaded on Demand) */}
+      <React.Suspense fallback={null}>
+        {isVoiceModalOpen && (
+          <VoiceModal
+            isOpen={isVoiceModalOpen}
+            onClose={() => setIsVoiceModalOpen(false)}
+            voices={voices}
+            selectedVoiceId={selectedVoice.id}
+            onSelectVoice={setSelectedVoice}
+          />
+        )}
 
-      <PricingModal
-        isOpen={isPricingModalOpen}
-        onClose={() => setIsPricingModalOpen(false)}
-        quota={quota}
-        onQuotaUpdated={refreshData}
-      />
+        {isPricingModalOpen && (
+          <PricingModal
+            isOpen={isPricingModalOpen}
+            onClose={() => setIsPricingModalOpen(false)}
+            quota={quota}
+            onQuotaUpdated={refreshData}
+          />
+        )}
 
-      <DeveloperModal
-        isOpen={isDeveloperModalOpen}
-        onClose={() => setIsDeveloperModalOpen(false)}
-        voices={voices}
-        quota={quota}
-        onOpenPricing={() => {
-          setIsDeveloperModalOpen(false);
-          setIsPricingModalOpen(true);
-        }}
-      />
+        {isDeveloperModalOpen && (
+          <DeveloperModal
+            isOpen={isDeveloperModalOpen}
+            onClose={() => setIsDeveloperModalOpen(false)}
+            voices={voices}
+            quota={quota}
+            onOpenPricing={() => {
+              setIsDeveloperModalOpen(false);
+              setIsPricingModalOpen(true);
+            }}
+          />
+        )}
 
-      <LegalModal
-        isOpen={isLegalModalOpen}
-        onClose={() => setIsLegalModalOpen(false)}
-        onOpenDocument={(docId) => navigateToLegal(docId)}
-      />
+        {isLegalModalOpen && (
+          <LegalModal
+            isOpen={isLegalModalOpen}
+            onClose={() => setIsLegalModalOpen(false)}
+            onOpenDocument={(docId) => navigateToLegal(docId)}
+          />
+        )}
+      </React.Suspense>
     </div>
   );
 };

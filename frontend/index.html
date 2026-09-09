@@ -19,6 +19,7 @@
     <meta name="author" content="Kokoro Voice Studio" />
     <meta name="theme-color" content="#2563eb" />
     <link rel="canonical" href="https://saytts.site/" />
+    <meta name="google-site-verification" content="vlrB5ikz6O5E-kH6VmREcY4upj5t6XNrVn6uRW6hJ6w" />
 
     <!-- Open Graph / Facebook / LinkedIn / Discord -->
     <meta property="og:type" content="website" />
@@ -42,26 +43,31 @@
     />
     <meta name="twitter:image" content="https://saytts.site/icon.png" />
 
-    <!-- App Favicons (Official Kokoro APK App Icon) -->
-    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=round1" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=round1" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=round1" />
-    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png?v=round1" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/favicon.png?v=round1" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=round1" />
-    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=round1" />
+    <!-- App Favicons (Official Kokoro App Icon) -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" />
 
     <!-- Google AdSense Verification Placeholder -->
     <!-- When connecting your Google AdSense account, uncomment this and replace ca-pub-XXXXXXXXXXXXXXXX with your Publisher ID -->
     <!-- <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXXX" crossorigin="anonymous"></script> -->
 
-    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <!-- Google Fonts: Inter & JetBrains Mono (Non-blocking with font-display: swap) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
+      rel="preload"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      as="style"
+      onload="this.onload=null;this.rel='stylesheet'"
     />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      />
+    </noscript>
 
     <!-- Structured Data (Schema.org JSON-LD) -->
     <script type="application/ld+json">
@@ -160,7 +166,30 @@
     </script>
   </head>
   <body class="antialiased min-h-screen">
-    <div id="root" class="min-h-screen"></div>
+    <div id="root" class="min-h-screen flex flex-col bg-gradient-to-b from-[#eaf3ff] via-[#e2edfc] to-[#d8e7fa] dark:from-[#0b0f19] dark:via-[#0e1322] dark:to-[#090d16] text-slate-900 dark:text-slate-100 font-sans">
+      <header class="sticky top-0 z-40 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-blue-100/60 dark:border-slate-800 select-none">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-full overflow-hidden shadow-md shadow-blue-500/20 flex items-center justify-center">
+              <img src="/logo-96.webp" alt="Kokoro Studio App Icon" width="36" height="36" class="w-full h-full object-cover" />
+            </div>
+            <span class="font-extrabold text-lg tracking-tight text-slate-900 dark:text-white font-sans">
+              Kokoro<span class="text-blue-600 font-bold ml-0.5">Studio</span>
+            </span>
+          </div>
+        </div>
+      </header>
+      <main class="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+        <section class="text-center pt-8 pb-6 px-4 max-w-3xl mx-auto select-none">
+          <h1 class="text-3xl sm:text-4xl md:text-5xl font-extrabold text-slate-900 dark:text-white tracking-tight mb-3">
+            Turn Your Text Into Realistic Speech
+          </h1>
+          <p class="text-slate-600 dark:text-slate-300 text-sm sm:text-base leading-relaxed max-w-2xl mx-auto">
+            Create natural-sounding audio with our advanced AI voices. Perfect for videos, podcasts, presentations and more.
+          </p>
+        </section>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
