@@ -85,6 +85,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Terminal className="w-3.5 h-3.5 text-blue-500" />
             <span>API</span>
           </button>
+          <a
+            href="https://github.com/dilshan916/kokoro-mobile/releases/download/v1.0.0/kokoro-voice-studio-v1.0.0-universal.apk"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center gap-1.5"
+            title="Download Android Mobile APK"
+          >
+            <Smartphone className="w-3.5 h-3.5 text-indigo-500" />
+            <span>Mobile App</span>
+          </a>
         </nav>
 
         {/* Right: Theme Toggle & User Avatar Dropdown */}
@@ -188,13 +198,13 @@ export const Navbar: React.FC<NavbarProps> = ({
 
                 {/* Mobile App Download */}
                 <a
-                  href="https://github.com/dilshan916/kokoro-voice-studio/releases/download/v1.0.0/kokoro-voice-studio-v1.0.0-universal.apk"
+                  href="https://github.com/dilshan916/kokoro-mobile/releases/download/v1.0.0/kokoro-voice-studio-v1.0.0-universal.apk"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700/60 text-left flex items-center gap-2 text-slate-700 dark:text-slate-200 transition-colors"
                 >
                   <Smartphone className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>Download Android App (APK)</span>
+                  <span>Download Mobile APK</span>
                 </a>
               </div>
             )}

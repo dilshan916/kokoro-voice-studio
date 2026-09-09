@@ -43,13 +43,13 @@ export const Footer: React.FC<FooterProps> = ({
 
           <div className="flex items-center gap-3 pt-1">
             <a
-              href="https://github.com/dilshan916/kokoro-voice-studio/releases/download/v1.0.0/kokoro-voice-studio-v1.0.0-universal.apk"
+              href="https://github.com/dilshan916/kokoro-mobile/releases/download/v1.0.0/kokoro-voice-studio-v1.0.0-universal.apk"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors text-xs font-semibold"
             >
               <Smartphone className="w-3.5 h-3.5 text-indigo-500" />
-              <span>Android APK</span>
+              <span>Download Mobile APK</span>
             </a>
             <a
               href={LEGAL_CONFIG.githubUrl}
