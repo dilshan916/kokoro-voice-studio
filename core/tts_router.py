@@ -102,30 +102,17 @@ class TTSRouter:
         engine_type = self.resolve_engine_for_voice(voice_str)
 
         if engine_type == "pocket":
-            try:
-                samples, sr = self.pocket.synthesize_text(
-                    text=text,
-                    voice=voice,
-                    speed=speed,
-                    lang=lang,
-                    master_preset=master_preset,
-                    progress_callback=progress_callback,
-                    custom_voice_state=custom_voice_state,
-                    **kwargs,
-                )
-                return samples, sr, "pocket"
-            except Exception as e:
-                logger.error(f"Pocket TTS synthesis error: {e}. Falling back to default Kokoro voice.")
-                # If a character voice fails, we fall back to Kokoro
-                samples, sr = self.kokoro.synthesize_text(
-                    text=text,
-                    voice="af_bella",
-                    speed=speed,
-                    lang=lang,
-                    master_preset=master_preset,
-                    progress_callback=progress_callback,
-                )
-                return samples, sr, "kokoro"
+            samples, sr = self.pocket.synthesize_text(
+                text=text,
+                voice=voice,
+                speed=speed,
+                lang=lang,
+                master_preset=master_preset,
+                progress_callback=progress_callback,
+                custom_voice_state=custom_voice_state,
+                **kwargs,
+            )
+            return samples, sr, "pocket"
 
         # Kokoro (Primary)
         samples, sr = self.kokoro.synthesize_text(

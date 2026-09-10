@@ -427,6 +427,9 @@ def _engine_worker_loop(
         kokoro = KokoroStudioEngine(model_dir=Path(model_dir))
         kokoro.load_model()
         pocket = PocketTTSEngine(auto_download=False)
+        if pocket.are_weights_cached():
+            logger.info("Pre-warming Pocket TTS model in engine worker...")
+            pocket.load_model()
         router = TTSRouter(kokoro_engine=kokoro, pocket_engine=pocket)
         engine = kokoro
 
