@@ -160,6 +160,24 @@ class BillingDB:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_token ON api_keys(api_key)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_device ON api_keys(device_id)")
 
+            # 5. Custom Voices Table
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS custom_voices (
+                    id TEXT PRIMARY KEY,
+                    device_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    engine TEXT NOT NULL DEFAULT 'pocket',
+                    type TEXT NOT NULL DEFAULT 'custom',
+                    reference_audio_path TEXT,
+                    state_file_path TEXT NOT NULL,
+                    duration_sec REAL DEFAULT 0.0,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_custom_voices_device ON custom_voices(device_id)")
+
             # Automatic migration: bump legacy 20,000 monthly limit to 30,000
             try:
                 cursor.execute("UPDATE devices SET monthly_limit = 30000 WHERE tier = 'free' AND monthly_limit = 20000")
@@ -911,6 +929,99 @@ class BillingDB:
             "monthly_limit": limit,
             "remaining_chars": max(0, limit - new_usage),
         }, "OK"
+
+    # -------------------------------------------------------------------------
+    # Custom Voices Management (Device-Scoped)
+    # -------------------------------------------------------------------------
+    def create_custom_voice(
+        self,
+        device_id: str,
+        voice_id: str,
+        name: str,
+        state_file_path: str,
+        reference_audio_path: Optional[str] = None,
+        duration_sec: float = 0.0,
+        engine: str = "pocket",
+    ) -> Dict[str, Any]:
+        """Registers a new custom voice cloned by an anonymous device."""
+        clean_dev = device_id.strip() if device_id else "dev_anonymous"
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO custom_voices (
+                    id, device_id, name, engine, type, reference_audio_path, state_file_path, duration_sec, created_at
+                ) VALUES (?, ?, ?, ?, 'custom', ?, ?, ?, ?)
+                """,
+                (voice_id, clean_dev, name.strip(), engine, reference_audio_path, state_file_path, duration_sec, now),
+            )
+            conn.commit()
+
+        return {
+            "id": voice_id,
+            "name": name.strip(),
+            "engine": engine,
+            "type": "custom",
+            "duration_sec": duration_sec,
+            "created_at": now,
+        }
+
+    def get_custom_voices(self, device_id: str) -> List[Dict[str, Any]]:
+        """Returns safe metadata (no disk paths) for all custom voices owned by the device."""
+        clean_dev = device_id.strip() if device_id else "dev_anonymous"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, name, engine, type, duration_sec, created_at
+                FROM custom_voices
+                WHERE device_id = ?
+                ORDER BY created_at DESC
+                """,
+                (clean_dev,),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_custom_voice_by_id(self, voice_id: str) -> Optional[Dict[str, Any]]:
+        """Returns full internal record (including state_file_path) by voice_id for backend synthesis."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM custom_voices WHERE id = ?", (voice_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def delete_custom_voice(self, device_id: str, voice_id: str) -> Optional[str]:
+        """
+        Deletes a custom voice only if owned by device_id.
+        Returns the state_file_path if deleted (so caller can clean up disk), or None if not found/unauthorized.
+        """
+        clean_dev = device_id.strip() if device_id else "dev_anonymous"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT state_file_path, reference_audio_path FROM custom_voices WHERE id = ? AND device_id = ?",
+                (voice_id, clean_dev),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            state_path = row["state_file_path"]
+            ref_path = row["reference_audio_path"]
+            cursor.execute("DELETE FROM custom_voices WHERE id = ? AND device_id = ?", (voice_id, clean_dev))
+            conn.commit()
+
+            # Clean up files on disk if they exist
+            try:
+                if state_path and os.path.exists(state_path):
+                    os.remove(state_path)
+                if ref_path and os.path.exists(ref_path):
+                    os.remove(ref_path)
+            except Exception as e:
+                logger.warning(f"Error removing custom voice files: {e}")
+
+            return state_path
 
 
 # Global singleton database instance

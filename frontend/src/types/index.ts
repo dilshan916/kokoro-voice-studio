@@ -6,6 +6,10 @@ export interface Voice {
   lang_name: string;
   flag: string;
   description: string;
+  engine?: 'kokoro' | 'pocket';
+  type?: 'standard' | 'custom' | 'character';
+  duration_sec?: number;
+  created_at?: string;
 }
 
 export interface LanguageOption {

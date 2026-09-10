@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response, status, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -83,6 +83,11 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 from core.kokoro_engine import MASTERING_PRESETS, VOICE_CATALOG
 from core.multilingual_g2p import CANONICAL_LANG_MAP
 from core.billing_db import billing_db
+from core.pocket_engine import PocketTTSEngine
+from core.tts_router import TTSRouter
+
+tts_router = TTSRouter()
+server_pocket_engine = PocketTTSEngine(auto_download=False)
 
 
 # ============================================================================
@@ -169,6 +174,8 @@ class VoiceMetadata(BaseModel):
     lang_name: str
     flag: str
     description: str
+    engine: Optional[str] = "kokoro"
+    type: Optional[str] = "standard"
 
 
 class HealthResponse(BaseModel):
@@ -413,8 +420,15 @@ def _engine_worker_loop(
     try:
         # Import and initialize heavy engine inside the worker process
         from core.kokoro_engine import KokoroStudioEngine
-        engine = KokoroStudioEngine(model_dir=Path(model_dir))
-        engine.load_model()
+        from core.pocket_engine import PocketTTSEngine
+        from core.tts_router import TTSRouter
+        from core.billing_db import billing_db
+
+        kokoro = KokoroStudioEngine(model_dir=Path(model_dir))
+        kokoro.load_model()
+        pocket = PocketTTSEngine(auto_download=False)
+        router = TTSRouter(kokoro_engine=kokoro, pocket_engine=pocket)
+        engine = kokoro
 
         # Signal ready state to main process
         response_queue.put({"type": "INIT_DONE", "success": True})
@@ -446,14 +460,34 @@ def _engine_worker_loop(
             punc_ms = int(task.get("pause_punctuation_ms", 150))
             para_ms = int(task.get("pause_paragraph_ms", 400))
 
-            # 1. Synthesize audio with multilingual G2P
-            samples, sr = engine.synthesize_text(
+            custom_voice_state = None
+            if voice_id.startswith("custom_"):
+                c_voice = billing_db.get_custom_voice_by_id(voice_id)
+                if c_voice:
+                    custom_voice_state = c_voice.get("state_file_path")
+                    voice_name = c_voice.get("name", voice_id)
+                    resolved_lang = "en-us"
+                else:
+                    raise ValueError(f"Custom voice '{voice_id}' not found in database.")
+            elif voice_id.startswith("pocket_"):
+                p_id = voice_id[len("pocket_"):]
+                p_meta = pocket.get_voice_catalog().get(p_id, {})
+                voice_name = p_meta.get("name", p_id.capitalize())
+                resolved_lang = "en-us"
+            else:
+                v_meta = VOICE_CATALOG.get(voice_id, {})
+                voice_name = v_meta.get("name", voice_id)
+                resolved_lang = lang if lang != "auto" else v_meta.get("lang", "en-us")
+
+            # 1. Synthesize audio with router (Kokoro for standard, Pocket for character/custom)
+            synth_res = router.synthesize(
                 text=text,
-                voice=voice_id,
+                voice_id=voice_id,
                 speed=speed,
                 lang=lang,
-                master_preset="Raw Unprocessed",
+                custom_voice_state=custom_voice_state,
             )
+            samples, sr = synth_res[0], synth_res[1]
 
             # Master audio with selected EQ preset
             audio_seg = engine.numpy_to_audiosegment(samples, sr)
@@ -474,7 +508,7 @@ def _engine_worker_loop(
             # 3. Save audio file to output directory
             file_ext = "mp3" if out_format == "mp3" else "wav"
             safe_voice = re.sub(r"[^\w\-]", "_", voice_id)
-            base_name = f"kokoro_{safe_voice}_{uuid.uuid4().hex[:8]}"
+            base_name = f"tts_{safe_voice}_{uuid.uuid4().hex[:8]}"
             filename = f"{base_name}.{file_ext}"
             file_dest = out_path / filename
 
@@ -492,11 +526,6 @@ def _engine_worker_loop(
             # Read audio file to base64 for instant in-memory browser playback without IDM interception
             with open(file_dest, "rb") as f:
                 audio_b64 = base64.b64encode(f.read()).decode("ascii")
-
-            # Determine voice name and resolved language
-            v_meta = VOICE_CATALOG.get(voice_id, {})
-            voice_name = v_meta.get("name", voice_id)
-            resolved_lang = lang if lang != "auto" else v_meta.get("lang", "en-us")
 
             # Send successful response with SRT data
             response_queue.put({
@@ -790,25 +819,31 @@ async def serve_sitemap_xml():
 
 
 @app.get("/health", response_model=HealthResponse, summary="Engine Health & Voice Catalog")
-async def health_check():
+async def health_check(request: Request):
     """
     Non-blocking endpoint returning engine initialization state,
-    supported languages, mastering presets, and all 60 catalog voices.
+    supported languages, mastering presets, and unified catalog voices.
     """
     engine_status = "ready" if engine_manager.is_ready else ("error" if engine_manager.init_error else "loading")
 
-    # Format 60 voices catalog metadata
+    dev_id = request.headers.get("x-device-id") or request.headers.get("X-Device-Id")
+    custom_voices = billing_db.get_custom_voices(dev_id) if dev_id else []
+    catalog = tts_router.get_unified_catalog(custom_voices=custom_voices)
+
+    # Format unified voices catalog metadata
     voices_list: List[VoiceMetadata] = []
-    for vid, vdata in VOICE_CATALOG.items():
+    for vdata in catalog:
         voices_list.append(
             VoiceMetadata(
-                id=vid,
-                name=vdata.get("name", vid),
+                id=vdata.get("id", ""),
+                name=vdata.get("name", vdata.get("id", "")),
                 gender=vdata.get("gender", "Neutral"),
                 lang=vdata.get("lang", "en-us"),
                 lang_name=vdata.get("lang_name", "English (US)"),
                 flag=vdata.get("flag", "🌐"),
                 description=vdata.get("description", ""),
+                engine=vdata.get("engine", "kokoro"),
+                type=vdata.get("type", "standard"),
             )
         )
 
@@ -887,7 +922,14 @@ async def render_audio(req: RenderRequest, request: Request, response: Response)
     response.headers["X-Quota-Remaining"] = str(quota_info.get("remaining_chars", "unlimited"))
 
     # Validate voice ID
-    if req.voice_id not in VOICE_CATALOG:
+    if req.voice_id.startswith("custom_"):
+        c_voice = billing_db.get_custom_voice_by_id(req.voice_id)
+        if not c_voice or c_voice.get("device_id") != device_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Custom voice '{req.voice_id}' not found or unauthorized for this device.",
+            )
+    elif not tts_router.is_valid_voice(req.voice_id):
         # Fallback to af_bella if unknown
         logger.warning(f"Requested voice '{req.voice_id}' not found in catalog, using 'af_bella'")
         req.voice_id = "af_bella"
@@ -921,6 +963,198 @@ async def render_audio(req: RenderRequest, request: Request, response: Response)
         srt_content=result.get("srt_content"),
         srt_filename=result.get("srt_filename"),
     )
+
+
+# ============================================================================
+# Voice Cloning & Custom Voices API (Device-Scoped)
+# ============================================================================
+
+CUSTOM_VOICES_DIR = BASE_DIR / "data" / "custom_voices"
+CUSTOM_VOICES_DIR.mkdir(parents=True, exist_ok=True)
+TEMP_AUDIO_DIR = BASE_DIR / "data" / "temp_audio"
+TEMP_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def get_audio_duration(file_path: str) -> float:
+    """Accurately measures audio duration in seconds."""
+    try:
+        import soundfile as sf
+        info = sf.info(file_path)
+        return float(info.duration)
+    except Exception:
+        try:
+            from pydub import AudioSegment
+            seg = AudioSegment.from_file(file_path)
+            return float(len(seg) / 1000.0)
+        except Exception as e:
+            logger.warning(f"Failed to calculate audio duration: {e}")
+            return 0.0
+
+
+# Unified TTS API Route Alias (POST /api/tts/generate -> render_audio)
+app.add_api_route(
+    "/api/tts/generate",
+    render_audio,
+    methods=["POST"],
+    response_model=RenderResponse,
+    summary="Unified Dual-Engine TTS Generation Endpoint",
+)
+
+
+@app.post("/api/voices/custom", summary="Upload Reference Audio to Clone a Custom Voice")
+async def create_custom_voice(
+    request: Request,
+    file: UploadFile = File(...),
+    name: str = Form(default=""),
+):
+    """
+    Accepts 3 to 30 seconds of speech audio (WAV, MP3, M4A, FLAC, OGG, <= 15MB)
+    and creates an isolated zero-shot custom voice for the caller's device ID.
+    """
+    device_id = (
+        request.headers.get("x-device-id")
+        or request.headers.get("X-Device-Id")
+        or "dev_anonymous"
+    )
+
+    clean_name = name.strip() if name else ""
+    if not clean_name or len(clean_name) > 50:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Voice name is required and must be between 1 and 50 characters.",
+        )
+
+    # Validate file extension
+    filename = file.filename or "recording.wav"
+    ext = Path(filename).suffix.lower()
+    if ext not in [".wav", ".mp3", ".m4a", ".ogg", ".flac"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported audio format '{ext}'. Allowed formats: WAV, MP3, M4A, OGG, FLAC.",
+        )
+
+    # Save uploaded file
+    voice_id = f"custom_{uuid.uuid4().hex[:12]}"
+    temp_upload_path = TEMP_AUDIO_DIR / f"{voice_id}{ext}"
+
+    content = await file.read()
+    max_size = 15 * 1024 * 1024  # 15 MB
+    if len(content) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Audio file size exceeds the 15 MB limit.",
+        )
+
+    with open(temp_upload_path, "wb") as f:
+        f.write(content)
+
+    # Validate audio duration (3 to 30 seconds)
+    duration = get_audio_duration(str(temp_upload_path))
+    if duration < 3.0:
+        try:
+            temp_upload_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Audio sample is too short ({duration:.1f}s). Please provide at least 3 seconds of clear speech.",
+        )
+    if duration > 30.0:
+        try:
+            temp_upload_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Audio sample exceeds 30 seconds ({duration:.1f}s). Please provide 3 to 30 seconds of audio.",
+        )
+
+    # Check if Pocket zero-shot cloning weights are cached and available
+    if not server_pocket_engine.are_weights_cached():
+        try:
+            temp_upload_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Pocket TTS voice cloning model weights are not cached locally. "
+                "Character voices ('alba', 'marius', 'javert', etc.) are ready to use, "
+                "but custom cloning requires cached weights."
+            ),
+        )
+
+    # Extract acoustic conditioning state
+    target_safetensors = CUSTOM_VOICES_DIR / f"{voice_id}.safetensors"
+    target_ref_audio = CUSTOM_VOICES_DIR / f"{voice_id}{ext}"
+
+    try:
+        import shutil
+        shutil.move(str(temp_upload_path), str(target_ref_audio))
+
+        # Extract and cache .safetensors state
+        server_pocket_engine.extract_and_cache_voice_state(
+            reference_audio_path=target_ref_audio,
+            output_safetensors_path=target_safetensors,
+        )
+
+        # Store in billing database scoped to device_id
+        record = billing_db.create_custom_voice(
+            device_id=device_id,
+            voice_id=voice_id,
+            name=clean_name,
+            state_file_path=str(target_safetensors),
+            reference_audio_path=str(target_ref_audio),
+            duration_sec=round(duration, 2),
+            engine="pocket",
+        )
+
+        return {
+            "success": True,
+            "voice": record,
+        }
+
+    except Exception as err:
+        logger.error(f"Voice cloning failed: {err}")
+        try:
+            target_safetensors.unlink(missing_ok=True)
+            target_ref_audio.unlink(missing_ok=True)
+            temp_upload_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to clone voice: {str(err)}",
+        )
+
+
+@app.get("/api/voices/custom", summary="List Custom Voices for Device")
+async def list_custom_voices(request: Request):
+    """Lists all custom cloned voices owned by the calling device ID."""
+    device_id = (
+        request.headers.get("x-device-id")
+        or request.headers.get("X-Device-Id")
+        or "dev_anonymous"
+    )
+    voices = billing_db.get_custom_voices(device_id=device_id)
+    return {"voices": voices}
+
+
+@app.delete("/api/voices/custom/{voice_id}", summary="Delete Custom Voice")
+async def delete_custom_voice(voice_id: str, request: Request):
+    """Deletes a custom cloned voice only if owned by the calling device ID."""
+    device_id = (
+        request.headers.get("x-device-id")
+        or request.headers.get("X-Device-Id")
+        or "dev_anonymous"
+    )
+    deleted_path = billing_db.delete_custom_voice(device_id=device_id, voice_id=voice_id)
+    if not deleted_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Custom voice not found or you do not have permission to delete it.",
+        )
+    return {"success": True, "deleted_id": voice_id}
 
 
 # ============================================================================

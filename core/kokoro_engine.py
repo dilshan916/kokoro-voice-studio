@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from core.multilingual_g2p import CANONICAL_LANG_MAP
+from core.base_engine import BaseTTSEngine
 
 # Lazy engine dependency placeholders
 np = None
@@ -225,8 +226,20 @@ MASTERING_PRESETS = [
 ]
 
 
-class KokoroStudioEngine:
+class KokoroStudioEngine(BaseTTSEngine):
     """Pro Studio TTS Engine supporting 54+ Multilingual Voices, Voice Blending, and Master EQ."""
+
+    @property
+    def engine_name(self) -> str:
+        return "kokoro"
+
+    @property
+    def sample_rate(self) -> int:
+        return 24000
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._is_loaded and self._kokoro is not None
 
     def __init__(self, model_dir: Optional[Path] = None):
         _ensure_engine_deps()
@@ -245,7 +258,6 @@ class KokoroStudioEngine:
 
         self._kokoro: Optional[Any] = None
         self._is_loaded = False
-        self.sample_rate = 24000
         self.g2p = MultilingualG2P()
 
     def load_model(self) -> bool:

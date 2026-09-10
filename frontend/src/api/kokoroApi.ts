@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { HealthData, RenderRequest, RenderResponse, UserQuota } from '../types';
+import { HealthData, RenderRequest, RenderResponse, UserQuota, Voice } from '../types';
 
 export const DEFAULT_CLOUD_VPS_URL = 'https://saytts.site';
 export const LOCAL_DEV_URL = 'http://127.0.0.1:8000';
@@ -216,6 +216,37 @@ export const kokoroApi = {
       device_id: devId,
       immediate,
     });
+    return response.data;
+  },
+
+  /**
+   * Fetch custom voices created by this device.
+   */
+  async getCustomVoices(): Promise<{ voices: Voice[] }> {
+    const response = await apiClient.get<{ voices: Voice[] }>('/api/voices/custom');
+    return response.data;
+  },
+
+  /**
+   * Upload reference audio file to clone a custom voice.
+   */
+  async uploadCustomVoice(name: string, file: File): Promise<{ success: boolean; voice: Voice }> {
+    const formData = new FormData();
+    formData.append('name', name);
+    formData.append('file', file);
+    const response = await apiClient.post<{ success: boolean; voice: Voice }>('/api/voices/custom', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  },
+
+  /**
+   * Delete a custom voice owned by this device.
+   */
+  async deleteCustomVoice(voiceId: string): Promise<{ success: boolean; deleted_id: string }> {
+    const response = await apiClient.delete<{ success: boolean; deleted_id: string }>(`/api/voices/custom/${encodeURIComponent(voiceId)}`);
     return response.data;
   },
 };
