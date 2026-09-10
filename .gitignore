@@ -42,3 +42,31 @@ config.yml
 *.mp3
 *.wav
 *.srt
+
+# Local Tests & Smoke Scripts (kept on local storage only)
+test_render.py
+vps_smoke_test.py
+tests/
+test_*.py
+*_test.py
+
+# Local Admin & Promo Tools (kept on local storage only)
+add_promo.py
+admin_tool.py
+generate_single_use.py
+list_codes.py
+
+# Local Server & Tunnel Scripts (kept on local storage only)
+start_ngrok.py
+start_ngrok_tunnel.js
+start_permanent_ngrok.bat
+start_permanent_server.bat
+start_public_studio.bat
+stop_all_servers.bat
+tunnel_server.bat
+restart_server.bat
+deploy_vps.sh
+setup_systemd.sh
+settings.json
+/package.json
+/package-lock.json
