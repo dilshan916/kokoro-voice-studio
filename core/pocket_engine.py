@@ -144,7 +144,12 @@ class PocketTTSEngine(BaseTTSEngine):
                 # Disable symlink warnings on Windows
                 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
-                model = TTSModel.load_model(language=self.language)
+                # High-fidelity generation settings: 3 iterative refinement steps & lower temperature
+                model = TTSModel.load_model(
+                    language=self.language,
+                    sampler_decode_steps=3,
+                    temp=0.25,
+                )
                 model.to("cpu")
                 self._model = model
                 self._is_loaded = True
