@@ -501,8 +501,6 @@ export const App: React.FC = () => {
             voices={voices}
             selectedVoiceId={selectedVoice.id}
             onSelectVoice={setSelectedVoice}
-            onVoiceCreated={() => refreshData()}
-            onVoiceDeleted={() => refreshData()}
           />
         )}
 

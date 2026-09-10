@@ -61,15 +61,6 @@ export const ControlCards: React.FC<ControlCardsProps> = React.memo(({
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-300 font-mono font-medium">
                   {selectedVoice.id}
                 </span>
-                {selectedVoice.type === 'custom' ? (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-medium">
-                    Custom Clone
-                  </span>
-                ) : selectedVoice.engine === 'pocket' ? (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-700 dark:text-purple-300 font-medium">
-                    Pocket TTS
-                  </span>
-                ) : null}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {selectedVoice.gender} • {selectedVoice.lang_name}

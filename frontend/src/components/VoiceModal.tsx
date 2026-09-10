@@ -1,9 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { X, Search, Check, Sparkles, Plus, Trash2 } from 'lucide-react';
+import { X, Search, Check, Sparkles } from 'lucide-react';
 import { Voice } from '../types';
 import { CountryFlag } from './CountryFlag';
-import { CreateVoiceModal } from './CreateVoiceModal';
-import { kokoroApi } from '../api/kokoroApi';
 
 interface VoiceModalProps {
   isOpen: boolean;
@@ -11,8 +9,6 @@ interface VoiceModalProps {
   voices: Voice[];
   selectedVoiceId: string;
   onSelectVoice: (voice: Voice) => void;
-  onVoiceCreated?: (voice: Voice) => void;
-  onVoiceDeleted?: (voiceId: string) => void;
 }
 
 export const VoiceModal: React.FC<VoiceModalProps> = ({
@@ -21,15 +17,11 @@ export const VoiceModal: React.FC<VoiceModalProps> = ({
   voices,
   selectedVoiceId,
   onSelectVoice,
-  onVoiceCreated,
-  onVoiceDeleted,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedEngine, setSelectedEngine] = useState<'all' | 'kokoro' | 'pocket' | 'custom'>('all');
   const [selectedLang, setSelectedLang] = useState('all');
   const [selectedGender, setSelectedGender] = useState<'all' | 'Female' | 'Male'>('all');
   const [activeTab, setActiveTab] = useState<'catalog' | 'blender'>('catalog');
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   // Voice Blender states
   const [blendVoiceA, setBlendVoiceA] = useState('af_bella');
@@ -52,9 +44,6 @@ export const VoiceModal: React.FC<VoiceModalProps> = ({
 
   const filteredVoices = useMemo(() => {
     return voices.filter((v) => {
-      if (selectedEngine === 'kokoro' && (v.engine === 'pocket' || v.type === 'custom')) return false;
-      if (selectedEngine === 'pocket' && (v.engine !== 'pocket' || v.type === 'custom')) return false;
-      if (selectedEngine === 'custom' && v.type !== 'custom') return false;
       if (selectedLang !== 'all' && v.lang !== selectedLang) return false;
       if (selectedGender !== 'all' && v.gender !== selectedGender) return false;
       if (searchQuery.trim()) {
@@ -68,7 +57,7 @@ export const VoiceModal: React.FC<VoiceModalProps> = ({
       }
       return true;
     });
-  }, [voices, selectedEngine, selectedLang, selectedGender, searchQuery]);
+  }, [voices, selectedLang, selectedGender, searchQuery]);
 
   if (!isOpen) return null;
 
@@ -92,21 +81,12 @@ export const VoiceModal: React.FC<VoiceModalProps> = ({
                 Choose a Voice
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {voices.length} natural neural voices across Kokoro & Pocket TTS
+                60 natural neural voices across 9+ international languages
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Clone Voice Button */}
-            <button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-sm transition-all cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Clone Voice</span>
-            </button>
-
             {/* Catalog vs Blender Tabs */}
             <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl text-xs font-medium">
               <button
@@ -176,28 +156,6 @@ export const VoiceModal: React.FC<VoiceModalProps> = ({
                 </div>
               </div>
 
-              {/* Engine Filters */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs">
-                {[
-                  { id: 'all', label: 'All Voices' },
-                  { id: 'kokoro', label: 'Kokoro Primary' },
-                  { id: 'pocket', label: 'Pocket Characters' },
-                  { id: 'custom', label: 'Custom Clones' },
-                ].map((eng) => (
-                  <button
-                    key={eng.id}
-                    onClick={() => setSelectedEngine(eng.id as any)}
-                    className={`px-3 py-1 rounded-xl transition-all font-semibold ${
-                      selectedEngine === eng.id
-                        ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-                        : 'bg-slate-100 dark:bg-slate-900/60 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                    }`}
-                  >
-                    {eng.label}
-                  </button>
-                ))}
-              </div>
-
               {/* Language Filter Chips */}
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
                 {languageFilters.map((lang) => (
@@ -239,23 +197,8 @@ export const VoiceModal: React.FC<VoiceModalProps> = ({
                         <CountryFlag lang={voice.lang} className="w-full h-full object-cover" />
                       </div>
                       <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
-                            {voice.name}
-                          </span>
-                          {voice.type === 'custom' ? (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold shrink-0">
-                              Custom
-                            </span>
-                          ) : voice.engine === 'pocket' ? (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-600 dark:text-purple-400 font-bold shrink-0">
-                              Pocket
-                            </span>
-                          ) : (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400 font-bold shrink-0">
-                              Kokoro
-                            </span>
-                          )}
+                        <div className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
+                          {voice.name}
                         </div>
                         <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                           {voice.gender} • {voice.lang_name}
@@ -263,33 +206,11 @@ export const VoiceModal: React.FC<VoiceModalProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {voice.type === 'custom' && (
-                        <button
-                          type="button"
-                          title="Delete custom voice"
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            if (window.confirm(`Delete custom voice "${voice.name}"?`)) {
-                              try {
-                                await kokoroApi.deleteCustomVoice(voice.id);
-                                onVoiceDeleted?.(voice.id);
-                              } catch (err) {
-                                console.error('Failed to delete custom voice:', err);
-                              }
-                            }
-                          }}
-                          className="p-1 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {isSelected && (
-                        <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0">
-                          <Check className="w-3 h-3 stroke-[3]" />
-                        </div>
-                      )}
-                    </div>
+                    {isSelected && (
+                      <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0">
+                        <Check className="w-3 h-3 stroke-[3]" />
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -383,18 +304,6 @@ export const VoiceModal: React.FC<VoiceModalProps> = ({
           </div>
         )}
       </div>
-
-      {isCreateModalOpen && (
-        <CreateVoiceModal
-          isOpen={isCreateModalOpen}
-          onClose={() => setIsCreateModalOpen(false)}
-          onVoiceCreated={(newVoice) => {
-            onVoiceCreated?.(newVoice);
-            onSelectVoice(newVoice);
-            setIsCreateModalOpen(false);
-          }}
-        />
-      )}
     </div>
   );
 };

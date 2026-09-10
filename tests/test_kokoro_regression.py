@@ -19,7 +19,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.base_engine import BaseTTSEngine
 from core.kokoro_engine import KokoroStudioEngine, VOICE_CATALOG, MASTERING_PRESETS
 
 
@@ -29,11 +28,9 @@ class TestKokoroRegression(unittest.TestCase):
         cls.engine = KokoroStudioEngine()
         cls.loaded = cls.engine.load_model()
 
-    def test_base_engine_conformance(self):
-        self.assertIsInstance(self.engine, BaseTTSEngine)
-        self.assertEqual(self.engine.engine_name, "kokoro")
+    def test_engine_loaded(self):
         self.assertEqual(self.engine.sample_rate, 24000)
-        self.assertTrue(self.engine.is_loaded)
+        self.assertTrue(self.engine._is_loaded)
 
     def test_default_synthesis(self):
         samples, sr = self.engine.synthesize_text("Kokoro regression verification.", voice="af_bella")

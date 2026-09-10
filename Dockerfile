@@ -19,8 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt uvicorn fastapi soundfile num
 # Copy app files and grant permissions to user
 COPY --chown=user:user . .
 
-# Ensure data directory exists with write permissions for SQLite billing database & custom cloned voices
-RUN mkdir -p /app/data /app/data/custom_voices /app/data/temp_audio /app/output /app/assets/kokoro && chown -R user:user /app
+# Ensure data directory exists with write permissions for SQLite billing database
+RUN mkdir -p /app/data /app/output /app/assets/kokoro && chown -R user:user /app
 
 USER user
 ENV HOME=/home/user \
