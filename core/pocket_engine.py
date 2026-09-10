@@ -97,9 +97,17 @@ class PocketTTSEngine(BaseTTSEngine):
     def init_error(self) -> Optional[str]:
         return self._init_error
 
+    def get_voice_catalog(self) -> Dict[str, Dict[str, str]]:
+        """Returns metadata catalog for all Pocket character voices."""
+        return POCKET_VOICE_CATALOG
+
     def are_weights_cached(self) -> bool:
         """Check whether local cache contains model weights without triggering network download."""
-        cache_root = Path(os.path.expanduser("~")) / ".cache" / "huggingface" / "hub"
+        hf_home = os.environ.get("HF_HOME")
+        if hf_home:
+            cache_root = Path(hf_home) / "hub"
+        else:
+            cache_root = Path(os.path.expanduser("~")) / ".cache" / "huggingface" / "hub"
         for repo_name in ["models--kyutai--pocket-tts-without-voice-cloning", "models--kyutai--pocket-tts"]:
             repo_dir = cache_root / repo_name / "snapshots"
             if repo_dir.exists():

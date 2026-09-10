@@ -470,9 +470,9 @@ def _engine_worker_loop(
                 else:
                     raise ValueError(f"Custom voice '{voice_id}' not found in database.")
             elif voice_id.startswith("pocket_"):
-                p_id = voice_id[len("pocket_"):]
-                p_meta = pocket.get_voice_catalog().get(p_id, {})
-                voice_name = p_meta.get("name", p_id.capitalize())
+                p_catalog = pocket.get_voice_catalog()
+                p_meta = p_catalog.get(voice_id) or p_catalog.get(f"pocket_{voice_id}") or {}
+                voice_name = p_meta.get("name", voice_id.replace("pocket_", "").capitalize())
                 resolved_lang = "en-us"
             else:
                 v_meta = VOICE_CATALOG.get(voice_id, {})
