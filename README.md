@@ -13,6 +13,12 @@
 
 ### 🔗 **[Try the Official Live Web App: https://saytts.site](https://saytts.site)**
 
+<br />
+
+<p align="center">
+  <img src="docs/screenshot.jpg" alt="Kokoro Voice Studio — Free AI Text to Speech & Neural Voice Generator" width="100%" />
+</p>
+
 </div>
 
 ---
