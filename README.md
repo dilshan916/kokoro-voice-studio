@@ -12,7 +12,7 @@
 ### **Next-Generation, Studio-Grade Neural Text-to-Speech Platform**
 *Synthesize ultra-realistic, natural voiceovers directly in your browser or self-host with Docker. Zero login required.*
 
-### 🔗 **[Try the Live Web App: https://saytts.site](https://saytts.site)**
+### 🔗 **[Official Live Web App: Kokoro Voice Studio (saytts.site)](https://saytts.site)**
 
 </div>
 

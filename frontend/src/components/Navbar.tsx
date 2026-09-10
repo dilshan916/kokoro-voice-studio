@@ -44,10 +44,10 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Left: Brand Logo & Title */}
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-full overflow-hidden shadow-md shadow-blue-500/20 flex items-center justify-center">
-            <img src="/logo-96.webp" alt="Kokoro Studio App Icon" width="36" height="36" className="w-full h-full object-cover" />
+            <img src="/logo-96.webp" alt="Kokoro Voice Studio App Icon" width="36" height="36" className="w-full h-full object-cover" />
           </div>
           <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-white font-sans">
-            Kokoro<span className="text-blue-600 font-bold ml-0.5">Studio</span>
+            Kokoro<span className="text-blue-600 font-bold ml-0.5">Voice Studio</span>
           </span>
         </div>
 
