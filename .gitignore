@@ -37,6 +37,8 @@ data/
 *.env
 config.yml
 *.apk
+frontend/public/ads.txt
+ads.txt
 
 # Audio files & test outputs
 *.mp3
