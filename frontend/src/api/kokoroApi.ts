@@ -22,7 +22,8 @@ export function getApiBaseUrl(): string {
   if (
     origin.includes('saytts.site') ||
     origin.includes('trycloudflare.com') ||
-    origin.includes('161.118.193.63') ||
+    origin.includes('localhost') ||
+    origin.includes('127.0.0.1') ||
     origin.includes(':8000')
   ) {
     return origin.replace(/\/+$/, '');
