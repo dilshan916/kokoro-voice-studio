@@ -49,16 +49,23 @@ export function getDeviceId(): string {
 }
 
 const apiClient = axios.create({
-  timeout: 600000, // 10 minutes for long multi-speaker scripts
+  timeout: 300000, // 5 minutes matching backend and nginx hierarchy
+  withCredentials: true, // Send HttpOnly saytts_session cookie on every request
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Automatically inject current API Base URL and Device ID on every request
+// Automatically inject current API Base URL, Device ID, and Device Token on every request
 apiClient.interceptors.request.use((config) => {
   config.baseURL = getApiBaseUrl();
   config.headers['X-Device-Id'] = getDeviceId();
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('saytts_device_token');
+    if (token) {
+      config.headers['X-Device-Token'] = token;
+    }
+  }
   return config;
 });
 
@@ -85,6 +92,40 @@ export const kokoroApi = {
   },
 
   /**
+   * Initialize or refresh server-issued anonymous session.
+   * Sets HttpOnly session cookie and returns session metadata.
+   */
+  async initSession(): Promise<{ device_id: string; token?: string; is_pro: boolean }> {
+    try {
+      const response = await apiClient.post<{ device_id: string; token: string; is_pro: boolean }>('/v1/auth/session');
+      if (response.data?.token) {
+        localStorage.setItem('saytts_device_token', response.data.token);
+      }
+      if (response.data?.device_id) {
+        localStorage.setItem('kokoro_device_id', response.data.device_id);
+      }
+      return response.data;
+    } catch (err) {
+      console.warn('Session init fallback:', err);
+      return { device_id: getDeviceId(), is_pro: false };
+    }
+  },
+
+  /**
+   * Recover account using 192-bit recovery key.
+   */
+  async recoverAccount(recoveryKey: string): Promise<{ success: boolean; device_id: string; token: string; is_pro: boolean; message: string }> {
+    const response = await apiClient.post('/v1/auth/recover', { recovery_key: recoveryKey.trim() });
+    if (response.data?.token) {
+      localStorage.setItem('saytts_device_token', response.data.token);
+    }
+    if (response.data?.device_id) {
+      localStorage.setItem('kokoro_device_id', response.data.device_id);
+    }
+    return response.data;
+  },
+
+  /**
    * Test connection to an arbitrary backend URL and return response latency in ms.
    */
   async pingServer(targetUrl?: string): Promise<{ latencyMs: number; data: HealthData }> {
@@ -92,7 +133,6 @@ export const kokoroApi = {
     const start = performance.now();
     const response = await axios.get<HealthData>(`${url}/health`, {
       timeout: 10000,
-      headers: { 'X-Device-Id': getDeviceId() },
     });
     const latencyMs = Math.round(performance.now() - start);
     return { latencyMs, data: response.data };
@@ -107,21 +147,18 @@ export const kokoroApi = {
   },
 
   /**
-   * Fetch device quota, usage, and subscription tier.
+   * Fetch device quota, usage, and subscription tier for authenticated session.
    */
   async getUserQuota(): Promise<UserQuota> {
-    const devId = getDeviceId();
-    const response = await apiClient.get<UserQuota>(`/v1/user/quota?device_id=${encodeURIComponent(devId)}`);
+    const response = await apiClient.get<UserQuota>('/v1/user/quota');
     return response.data;
   },
 
   /**
    * Redeem VIP promo or license key (e.g. KOKORO-VIP-FRIEND) to upgrade device to Pro.
    */
-  async redeemLicense(code: string): Promise<{ success: boolean; message: string; quota: any }> {
-    const devId = getDeviceId();
+  async redeemLicense(code: string): Promise<{ success: boolean; message: string; quota: any; recovery_key?: string }> {
     const response = await apiClient.post('/v1/user/redeem-license', {
-      device_id: devId,
       code: code.trim(),
     });
     return response.data;
@@ -131,10 +168,23 @@ export const kokoroApi = {
    * Synthesize text into mastered speech audio.
    */
   async renderSpeech(payload: RenderRequest): Promise<RenderResponse> {
-    const response = await apiClient.post<RenderResponse>('/render', {
-      ...payload,
-      device_id: getDeviceId(),
-    });
+    const response = await apiClient.post<RenderResponse>('/render', payload);
+    return response.data;
+  },
+
+  /**
+   * Submit long-form Pro async TTS job.
+   */
+  async createTTSJob(payload: any): Promise<{ job_id: string; status: string }> {
+    const response = await apiClient.post('/v1/tts/jobs', payload);
+    return response.data;
+  },
+
+  /**
+   * Get status of async TTS job.
+   */
+  async getTTSJob(jobId: string): Promise<any> {
+    const response = await apiClient.get(`/v1/tts/jobs/${encodeURIComponent(jobId)}`);
     return response.data;
   },
 
@@ -154,11 +204,10 @@ export const kokoroApi = {
   },
 
   /**
-   * Developer API: List all active API keys for this device.
+   * Developer API: List all active API keys for this session.
    */
   async getDeveloperKeys(): Promise<{ device_id: string; quota: UserQuota; keys: any[] }> {
-    const devId = getDeviceId();
-    const response = await apiClient.get(`/v1/developer/keys?device_id=${encodeURIComponent(devId)}`);
+    const response = await apiClient.get('/v1/developer/keys');
     return response.data;
   },
 
@@ -166,10 +215,8 @@ export const kokoroApi = {
    * Developer API: Generate a new API key.
    */
   async createDeveloperKey(name: string = 'Default API Key'): Promise<any> {
-    const devId = getDeviceId();
     const response = await apiClient.post('/v1/developer/keys', {
       name,
-      device_id: devId,
     });
     return response.data;
   },
@@ -178,8 +225,7 @@ export const kokoroApi = {
    * Developer API: Revoke an existing API key.
    */
   async revokeDeveloperKey(keyId: string): Promise<{ success: boolean; message: string }> {
-    const devId = getDeviceId();
-    const response = await apiClient.delete(`/v1/developer/keys/${encodeURIComponent(keyId)}?device_id=${encodeURIComponent(devId)}`);
+    const response = await apiClient.delete(`/v1/developer/keys/${encodeURIComponent(keyId)}`);
     return response.data;
   },
 
@@ -187,9 +233,7 @@ export const kokoroApi = {
    * Create secure checkout session link for Pro subscription.
    */
   async createCheckoutSession(returnUrl?: string): Promise<{ checkout_url: string | null; message?: string }> {
-    const devId = getDeviceId();
     const response = await apiClient.post('/v1/billing/create-checkout-session', {
-      device_id: devId,
       return_url: returnUrl,
     });
     return response.data;
@@ -199,9 +243,7 @@ export const kokoroApi = {
    * Toggle subscription auto-renewal (turn on or off).
    */
   async toggleAutoRenew(cancelAtPeriodEnd: boolean): Promise<{ success: boolean; message: string; quota: UserQuota; cancel_at_period_end: boolean }> {
-    const devId = getDeviceId();
     const response = await apiClient.post('/v1/billing/toggle-auto-renew', {
-      device_id: devId,
       cancel_at_period_end: cancelAtPeriodEnd,
     });
     return response.data;
@@ -211,9 +253,7 @@ export const kokoroApi = {
    * Cancel subscription (immediate or at period end).
    */
   async cancelSubscription(immediate: boolean = false): Promise<{ success: boolean; message: string; quota: UserQuota }> {
-    const devId = getDeviceId();
     const response = await apiClient.post('/v1/billing/cancel-subscription', {
-      device_id: devId,
       immediate,
     });
     return response.data;

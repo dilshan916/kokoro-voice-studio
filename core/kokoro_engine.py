@@ -299,7 +299,7 @@ class KokoroStudioEngine:
         # Multi-tiered fallback loading strategies for constrained / fragmented RAM environments
         strategies = [
             # Tier 1: Standard optimized CPU execution
-            {"name": "Standard Optimized", "arena": True, "mem_pattern": True, "threads": min(4, os.cpu_count() or 2), "opt": rt.GraphOptimizationLevel.ORT_ENABLE_BASIC},
+            {"name": "Standard Optimized", "arena": True, "mem_pattern": True, "threads": min(2, os.cpu_count() or 1), "opt": rt.GraphOptimizationLevel.ORT_ENABLE_BASIC},
             # Tier 2: Low-RAM mode (Disable memory arena to eliminate large contiguous block allocations)
             {"name": "Low-Memory (Arena Disabled)", "arena": False, "mem_pattern": False, "threads": min(2, os.cpu_count() or 1), "opt": rt.GraphOptimizationLevel.ORT_ENABLE_BASIC},
             # Tier 3: Ultra Low-RAM / Zero-opt mode
@@ -472,11 +472,15 @@ class KokoroStudioEngine:
         lang: Optional[str] = "auto",
         master_preset: str = "Clean Studio (Default)",
         progress_callback: Optional[Callable[[float, str], None]] = None,
+        cancellation_check: Optional[Callable[[], bool]] = None,
     ) -> Tuple[np.ndarray, int]:
         """
         Synthesize speech from multilingual text with G2P preprocessing and pause parsing.
         Automatically detects multi-speaker dialogue scripts and routes per-speaker voices & G2P engines.
         """
+        if cancellation_check and cancellation_check():
+            raise RuntimeError("Synthesis cancelled by client disconnect")
+
         if not self._is_loaded:
             self.load_model()
 
@@ -501,6 +505,9 @@ class KokoroStudioEngine:
             silence_gap = np.zeros(silence_len, dtype=np.float32)
 
             for idx, (spk, line_lang, line_content) in enumerate(parsed_dialogue):
+                if cancellation_check and cancellation_check():
+                    raise RuntimeError("Synthesis cancelled by client disconnect")
+
                 if not line_content:
                     continue
 
@@ -526,6 +533,7 @@ class KokoroStudioEngine:
                     speed=speed,
                     lang=cur_lang,
                     master_preset="Raw Unprocessed",
+                    cancellation_check=cancellation_check,
                 )
 
                 if len(line_samples) > 0:
@@ -546,6 +554,9 @@ class KokoroStudioEngine:
         clean_text = self.g2p.normalize_text(text)
         if not clean_text:
             return np.array([], dtype=np.float32), self.sample_rate
+
+        if cancellation_check and cancellation_check():
+            raise RuntimeError("Synthesis cancelled by client disconnect")
 
         # Determine target voice style vector
         if isinstance(voice, str):
@@ -572,6 +583,9 @@ class KokoroStudioEngine:
         if len(segments) > 1:
             combined_samples = []
             for idx in range(0, len(segments), 2):
+                if cancellation_check and cancellation_check():
+                    raise RuntimeError("Synthesis cancelled by client disconnect")
+
                 chunk_text = segments[idx].strip()
                 if chunk_text:
                     if progress_callback:
@@ -579,6 +593,9 @@ class KokoroStudioEngine:
 
                     # Multilingual G2P phonemize (preserves mid-phrase flow and prosody)
                     phonemes, chunk_lang = self.g2p.phonemize(chunk_text, lang=resolved_lang, default_lang=voice_lang)
+                    if cancellation_check and cancellation_check():
+                        raise RuntimeError("Synthesis cancelled by client disconnect")
+
                     if phonemes:
                         samples, sr = self._kokoro.create(phonemes, voice=voice_style, speed=speed, is_phonemes=True)
                         # Apply 8ms linear fade-in/fade-out to eliminate click/pop boundary artifacts
@@ -600,10 +617,16 @@ class KokoroStudioEngine:
             else:
                 final_samples = np.array([], dtype=np.float32)
         else:
+            if cancellation_check and cancellation_check():
+                raise RuntimeError("Synthesis cancelled by client disconnect")
+
             if progress_callback:
                 progress_callback(0.3, "Synthesizing voice...")
 
             phonemes, _ = self.g2p.phonemize(clean_text, lang=resolved_lang, default_lang=voice_lang)
+            if cancellation_check and cancellation_check():
+                raise RuntimeError("Synthesis cancelled by client disconnect")
+
             if phonemes:
                 final_samples, _ = self._kokoro.create(phonemes, voice=voice_style, speed=speed, is_phonemes=True)
                 final_samples = apply_boundary_fades(final_samples, fade_ms=8.0, sample_rate=self.sample_rate)
@@ -623,11 +646,15 @@ class KokoroStudioEngine:
         lang: Optional[str] = "auto",
         master_preset: str = "Clean Studio (Default)",
         progress_callback: Optional[Callable[[float, str], None]] = None,
+        cancellation_check: Optional[Callable[[], bool]] = None,
     ) -> Tuple[np.ndarray, int, str]:
         """
         Synthesize speech and generate perfectly synchronized CapCut/Premiere SubRip (.srt) subtitles.
         Handles both Multi-Speaker Drama scripts and Single Speaker multi-sentence paragraphs.
         """
+        if cancellation_check and cancellation_check():
+            raise RuntimeError("Synthesis cancelled by client disconnect")
+
         if not self._is_loaded:
             self.load_model()
 
@@ -657,6 +684,9 @@ class KokoroStudioEngine:
             silence_gap = np.zeros(silence_len, dtype=np.float32)
 
             for idx, (spk, line_lang, line_content) in enumerate(parsed_dialogue):
+                if cancellation_check and cancellation_check():
+                    raise RuntimeError("Synthesis cancelled by client disconnect")
+
                 if not line_content:
                     continue
 
@@ -690,6 +720,7 @@ class KokoroStudioEngine:
                     speed=speed,
                     lang=cur_lang,
                     master_preset="Raw Unprocessed",
+                    cancellation_check=cancellation_check,
                 )
 
                 if len(line_samples) > 0:
@@ -731,6 +762,9 @@ class KokoroStudioEngine:
         inter_sentence_gap = np.zeros(int(inter_sentence_gap_dur * self.sample_rate), dtype=np.float32)
 
         for idx, s_chunk in enumerate(sentence_chunks):
+            if cancellation_check and cancellation_check():
+                raise RuntimeError("Synthesis cancelled by client disconnect")
+
             if not s_chunk:
                 continue
 
@@ -743,6 +777,7 @@ class KokoroStudioEngine:
                 speed=speed,
                 lang=lang,
                 master_preset="Raw Unprocessed",
+                cancellation_check=cancellation_check,
             )
 
             if len(chunk_samples) > 0:

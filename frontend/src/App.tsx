@@ -203,6 +203,7 @@ export const App: React.FC = () => {
   // Fetch backend health & quota
   const refreshData = useCallback(async () => {
     try {
+      await kokoroApi.initSession();
       const [healthData, quotaData] = await Promise.allSettled([
         kokoroApi.getHealth(),
         kokoroApi.getUserQuota(),

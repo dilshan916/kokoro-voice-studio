@@ -1,172 +1,171 @@
 """
-Kokoro Voice Studio Pro — Standalone FastAPI Backend Server
-============================================================
-High-performance, async-isolated REST backend exposing Kokoro-82M TTS,
-Multilingual G2P phonemization (9+ languages), acoustic EQ mastering presets,
-and audio rendering over standard HTTP APIs.
-
-Features:
-  - Asynchronous background model loading in an isolated process.
-  - Non-blocking GET /health endpoint reporting status & 60-voice catalog.
-  - POST /render endpoint with timeout protection, G2P routing & master EQ.
-  - GET /audio/{filename} static audio file streaming with CORS support.
-  - Windows multiprocessing safe with freeze_support().
+Kokoro Studio — Production FastAPI Backend Server
+=================================================
+Hardened, high-performance multilingual TTS & mastering backend powered by Kokoro-82M ONNX.
+Featuring:
+- Server-issued anonymous session authorization (HttpOnly secure cookie + X-Device-Token)
+- Strict account isolation & high-entropy recovery keys
+- Dual-worker architecture: Worker 1 (interactive <= 3k/6k) & Worker 2 (batch jobs <= 25k)
+- Bounded queues (sync: 20, batch: 50) and cooperative client disconnect cancellation
+- 128-bit audio filename entropy with authenticated ownership and 2-hour TTL retention
+- Zero plaintext API keys at rest or in API responses
+- License brute-force lockout defense
+- CORS origin restriction & OpenAPI schema exclusion for administrative routes
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
+from contextlib import asynccontextmanager
+import datetime
+import hashlib
+import io
 import logging
 import multiprocessing as mp
 import os
-import re
-import json
-import sys
-import threading
-import time
-import uuid
-from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+import queue
+import re
+import secrets
+import shutil
+import sys
+import time
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+import uuid
 
-import uvicorn
-from fastapi import FastAPI, HTTPException, Request, Response, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
+import numpy as np
 from pydantic import BaseModel, Field
+import uvicorn
+from fastapi import Depends, FastAPI, HTTPException, Header, Request, Response, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
-# Guard against None stdout/stderr in windowless PyInstaller execution
-if sys.stdout is None:
-    try:
-        sys.stdout = open(os.devnull, "w", encoding="utf-8", errors="ignore")
-    except Exception:
-        pass
+from core.billing_db import billing_db
+from core.kokoro_engine import MASTERING_PRESETS, VOICE_CATALOG
 
-if sys.stderr is None:
-    try:
-        sys.stderr = open(os.devnull, "w", encoding="utf-8", errors="ignore")
-    except Exception:
-        pass
+# ============================================================================
+# Paths, Directories & Logging Setup
+# ============================================================================
 
-# Configure UTF-8 encoding for Windows console
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+BASE_DIR = Path(__file__).resolve().parent
+ASSETS_DIR = BASE_DIR / "assets"
+OUTPUT_DIR = BASE_DIR / "output"
+DATA_DIR = BASE_DIR / "data"
 
-# Setup logging
+for d in (ASSETS_DIR, OUTPUT_DIR, DATA_DIR):
+    d.mkdir(parents=True, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
-logger = logging.getLogger("kokoro.server")
+logger = logging.getLogger("kokoro-server")
 
-# Base directory paths (supports both standard execution and PyInstaller sys._MEIPASS bundle)
-if getattr(sys, "frozen", False):
-    BASE_DIR = Path(sys._MEIPASS)
-    OUTPUT_DIR = Path(os.getcwd()) / "output"
-else:
-    BASE_DIR = Path(__file__).resolve().parent
-    OUTPUT_DIR = BASE_DIR / "output"
+# Security & Policy Constants
+COOKIE_NAME = "saytts_session"
+DEFAULT_ARTIFACT_TTL = 7200  # 2 hours
+MAX_FREE_CHARS_SYNC = 3000
+MAX_PRO_CHARS_SYNC = 6000
+MAX_PRO_CHARS_ASYNC = 25000
+MAX_INTERACTIVE_QUEUE = 20
+MAX_BATCH_QUEUE = 50
 
-ASSETS_DIR = BASE_DIR / "assets" / "kokoro"
-MODEL_PATH = str(ASSETS_DIR / "kokoro-v1.0.onnx")
-VOICES_PATH = str(ASSETS_DIR / "voices-v1.0.bin")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+ADMIN_SECRET_KEY = os.environ.get("ADMIN_SECRET_KEY", "")
 
-# Import voice catalog and presets metadata (pure data structures, no heavy loading)
-from core.kokoro_engine import MASTERING_PRESETS, VOICE_CATALOG
-from core.multilingual_g2p import CANONICAL_LANG_MAP
-from core.billing_db import billing_db
-
+# In-memory tracking for free-tier concurrency enforcement (1 active render per session)
+active_free_renders: Set[str] = set()
 
 # ============================================================================
-# Pydantic Request / Response Schemas
+# Pydantic Request & Response Schemas
 # ============================================================================
 
 class RenderRequest(BaseModel):
-    text: str = Field(..., description="Input text to synthesize", min_length=1, max_length=100000)
-    voice_id: str = Field(default="af_bella", description="Voice ID from catalog (e.g. af_bella, jf_alpha, ff_camille)")
-    speed: float = Field(default=1.0, ge=0.5, le=2.0, description="Speech speed multiplier (0.5 to 2.0)")
-    eq_preset: str = Field(default="Clean Studio (Default)", description="Acoustic mastering EQ preset name")
-    lang: str = Field(default="auto", description="Language code (e.g. 'auto', 'en-us', 'ja', 'fr-fr', 'ko', 'cmn', 'es', 'hi')")
-    output_format: str = Field(default="wav", description="Audio output format ('wav' or 'mp3')")
-    pause_punctuation_ms: int = Field(default=150, ge=0, le=1000, description="Pause duration after commas/colons in milliseconds")
-    pause_paragraph_ms: int = Field(default=400, ge=0, le=2000, description="Pause duration between paragraphs/periods in milliseconds")
-    device_id: Optional[str] = Field(default=None, description="Client anonymous device ID for monthly quota tracking")
+    text: str = Field(..., description="Input text to synthesize", min_length=1, max_length=25000)
+    voice_id: str = Field("af_bella", description="Voice ID from the voice catalog")
+    speed: float = Field(1.0, ge=0.5, le=2.0, description="Speech speed multiplier (0.5 to 2.0)")
+    lang: Optional[str] = Field("auto", description="Target language code or 'auto'")
+    eq_preset: Optional[str] = Field("Clean Studio (Default)", description="Acoustic mastering EQ preset")
+    output_format: Optional[str] = Field("wav", description="Audio container format ('wav' or 'mp3')")
+    pause_punctuation_ms: Optional[int] = Field(150, ge=0, le=2000, description="Pause after punctuation marks (ms)")
+    pause_paragraph_ms: Optional[int] = Field(400, ge=0, le=5000, description="Pause between paragraphs (ms)")
+    device_id: Optional[str] = Field(None, description="Deprecated client identifier (ignored for auth)")
 
+class CreateTTSJobRequest(BaseModel):
+    text: str = Field(..., description="Input text for asynchronous batch rendering", min_length=1, max_length=25000)
+    voice_id: str = Field("af_bella", description="Voice ID from the voice catalog")
+    speed: float = Field(1.0, ge=0.5, le=2.0, description="Speech speed multiplier (0.5 to 2.0)")
+    lang: Optional[str] = Field("auto", description="Target language code or 'auto'")
+    eq_preset: Optional[str] = Field("Clean Studio (Default)", description="Acoustic mastering EQ preset")
+    output_format: Optional[str] = Field("wav", description="Audio container format ('wav' or 'mp3')")
+    pause_punctuation_ms: Optional[int] = Field(150, ge=0, le=2000)
+    pause_paragraph_ms: Optional[int] = Field(400, ge=0, le=5000)
 
 class RedeemLicenseRequest(BaseModel):
-    device_id: str = Field(..., description="Anonymous client Device ID")
-    code: str = Field(..., description="Promo or VIP License code (e.g. KOKORO-VIP-FRIEND)")
-
+    code: str = Field(..., description="VIP promo or license key code", min_length=4, max_length=64)
+    device_id: Optional[str] = Field(None, description="Deprecated (ignored, session used)")
 
 class CreateCheckoutRequest(BaseModel):
-    device_id: str = Field(..., description="Anonymous client Device ID")
-    return_url: Optional[str] = Field(default=None, description="Optional redirect URL after checkout")
-
+    return_url: Optional[str] = None
+    tier: str = Field("pro", description="Requested tier")
+    device_id: Optional[str] = Field(None, description="Deprecated (ignored, session used)")
 
 class GrantProRequest(BaseModel):
-    device_id: str = Field(..., description="Target Device ID")
-    tier: str = Field(default="pro", description="Target tier: 'free' or 'pro'")
-    note: str = Field(default="API Grant", description="Administrative note")
-
+    device_id: str = Field(..., min_length=3)
+    tier: str = Field("pro")
+    note: Optional[str] = None
 
 class CreateLicenseKeyRequest(BaseModel):
-    code: str = Field(..., description="Custom promo or license code", min_length=4)
-    tier: str = Field(default="pro", description="Target tier: 'free' or 'pro'")
-    max_uses: int = Field(default=1, description="Maximum allowed redemptions (-1 for unlimited)")
-    note: str = Field(default="Admin Created", description="Administrative note")
-
+    code: Optional[str] = None
+    tier: str = Field("pro")
+    max_uses: int = Field(1, ge=1, le=1000)
+    note: Optional[str] = None
 
 class ToggleAutoRenewRequest(BaseModel):
-    device_id: str = Field(..., description="Target Device ID")
-    cancel_at_period_end: bool = Field(True, description="True to turn off auto-renew at period end, False to re-enable")
-
+    cancel_at_period_end: bool = Field(..., description="True to cancel renewal at period end")
+    device_id: Optional[str] = Field(None, description="Deprecated (ignored, session used)")
 
 class CancelSubscriptionRequest(BaseModel):
-    device_id: str = Field(..., description="Target Device ID")
-    immediate: bool = Field(False, description="True to cancel immediately and revert to free tier")
-
+    immediate: bool = Field(False, description="True to cancel immediately, False at period end")
+    device_id: Optional[str] = Field(None, description="Deprecated (ignored, session used)")
 
 class OpenAISpeechRequest(BaseModel):
-    model: str = Field(default="kokoro", description="Model name (e.g. 'kokoro', 'kokoro-82m', 'tts-1', 'tts-1-hd')")
-    input: str = Field(..., description="The text to generate audio for", min_length=1, max_length=100000)
-    voice: str = Field(default="af_bella", description="Voice ID from catalog (e.g. af_bella, am_adam, jf_alpha)")
-    response_format: str = Field(default="mp3", description="Audio format: mp3, wav, flac, aac, opus")
-    speed: float = Field(default=1.0, ge=0.25, le=4.0, description="Speech speed multiplier (0.25 to 4.0)")
-    eq_preset: Optional[str] = Field(default="Clean Studio (Default)", description="Acoustic mastering EQ preset name")
-    lang: Optional[str] = Field(default="auto", description="Language code")
-    pause_punctuation_ms: Optional[int] = Field(default=150, description="Pause duration after commas/colons in milliseconds")
-    pause_paragraph_ms: Optional[int] = Field(default=400, description="Pause duration between paragraphs/periods in milliseconds")
-
+    model: str = Field("kokoro", description="Model identifier ('kokoro', 'tts-1')")
+    input: str = Field(..., description="Text to synthesize", min_length=1, max_length=25000)
+    voice: str = Field("alloy", description="Voice identifier")
+    response_format: str = Field("mp3", description="Audio format ('mp3', 'wav', 'aac', 'flac', 'opus')")
+    speed: float = Field(1.0, ge=0.25, le=4.0, description="Speech rate multiplier")
+    eq_preset: Optional[str] = Field(None, description="EQ preset")
+    lang: Optional[str] = Field("auto", description="Language code")
+    pause_punctuation_ms: Optional[int] = Field(150)
+    pause_paragraph_ms: Optional[int] = Field(400)
 
 class CreateApiKeyRequest(BaseModel):
-    name: str = Field(default="Default API Key", max_length=100, description="Friendly label for this API key")
-    device_id: Optional[str] = Field(default=None, description="Anonymous client Device ID")
+    name: str = Field("Default API Key", max_length=60)
+    device_id: Optional[str] = Field(None, description="Deprecated (ignored, session used)")
 
+class RecoverAccountRequest(BaseModel):
+    recovery_key: str = Field(..., min_length=16, description="192-bit Pro account recovery key")
 
 class RenderResponse(BaseModel):
     success: bool
-    audio_path: str = Field(..., description="Absolute local path to generated audio file")
-    audio_url: str = Field(..., description="Relative HTTP endpoint URL to stream/download audio")
-    filename: str = Field(..., description="Audio file name")
-    duration: float = Field(..., description="Audio duration in seconds")
-    sample_rate: int = Field(default=24000, description="Audio sample rate (Hz)")
-    file_size_bytes: int = Field(..., description="Audio file size in bytes")
+    audio_path: str
+    audio_url: str
+    filename: str
+    duration: float
+    sample_rate: int
+    file_size_bytes: int
     voice_id: str
     voice_name: str
     lang_resolved: str
     eq_preset: str
-    audio_base64: Optional[str] = Field(default=None, description="Base64 encoded in-memory audio data for zero-interception streaming")
-    srt_content: Optional[str] = Field(default=None, description="Synchronized CapCut/Premiere SubRip (.srt) subtitle content")
-    srt_filename: Optional[str] = Field(default=None, description="Subtitle file name (.srt)")
-
+    audio_base64: Optional[str] = None
+    srt_content: Optional[str] = None
+    srt_filename: Optional[str] = None
 
 class VoiceMetadata(BaseModel):
     id: str
@@ -177,10 +176,9 @@ class VoiceMetadata(BaseModel):
     flag: str
     description: str
 
-
 class HealthResponse(BaseModel):
-    status: str = Field(..., description="Engine status: 'ready', 'loading', or 'error'")
-    version: str = "2.5.0"
+    status: str
+    version: str
     model_loaded: bool
     voices_count: int
     output_directory: str
@@ -190,11 +188,11 @@ class HealthResponse(BaseModel):
 
 
 # ============================================================================
-# Smart Punchy SRT Subtitle Builder (CapCut / Premiere / Reels / TikTok)
+# Subtitle & CJK Helpers
 # ============================================================================
 
 def format_srt_timestamp(seconds: float) -> str:
-    """Convert seconds (float) into standard SubRip (SRT) timestamp format: HH:MM:SS,mmm"""
+    """Format seconds into SubRip timestamp: HH:MM:SS,mmm"""
     if seconds < 0:
         seconds = 0.0
     millis = int(round((seconds - int(seconds)) * 1000))
@@ -209,120 +207,108 @@ def format_srt_timestamp(seconds: float) -> str:
 
 
 def is_cjk_text(text: str) -> bool:
-    """Detect whether string contains CJK characters (Japanese Kana/Kanji, Chinese Hanzi, Korean Hangul)."""
-    return bool(re.search(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f\uac00-\ud7af]", text))
+    """Detect if string contains Chinese, Japanese, or Korean characters."""
+    return bool(re.search(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]", text))
 
 
 def split_cjk_clause(clause: str, max_chars: int = 18) -> List[str]:
-    """
-    Split a CJK clause without spaces into 12-18 character readable subtitle chunks.
-    Preserves whole Latin words (e.g. 'Kokoro Voice Studio') while partitioning on particles or commas.
-    """
+    """Break long CJK clauses into readable subtitle chunks."""
+    clause = clause.strip()
+    if not clause:
+        return []
     if len(clause) <= max_chars:
         return [clause]
-
-    # If clause contains spaces (mixed Latin/CJK), split along space boundaries first
-    if " " in clause:
-        tokens = clause.split(" ")
-        chunks = []
-        current = ""
-        for t in tokens:
-            if not current:
-                current = t
-            elif len(current) + len(t) + 1 <= max_chars + 4:
-                current += " " + t
-            else:
-                chunks.append(current)
-                current = t
-        if current:
-            chunks.append(current)
-        return [c for c in chunks if c.strip()]
-
-    # Pure CJK character stream splitting
+    sub_parts = re.split(r"([，、；：\s]+)", clause)
     chunks = []
     current = ""
-    for char in clause:
-        current += char
-        if len(current) >= max_chars - 3 and char in "はがをにでもへとたらば、，":
-            chunks.append(current)
-            current = ""
-        elif len(current) >= max_chars:
-            chunks.append(current)
-            current = ""
-
-    if current:
-        if chunks and len(current) <= 3:
-            chunks[-1] += current
+    for part in sub_parts:
+        if not part:
+            continue
+        if len(current) + len(part) <= max_chars:
+            current += part
         else:
-            chunks.append(current)
+            if current.strip():
+                chunks.append(current.strip())
+            current = part
+    if current.strip():
+        chunks.append(current.strip())
 
-    return [c for c in chunks if c.strip()]
+    final_chunks = []
+    for c in chunks:
+        if len(c) > max_chars:
+            for i in range(0, len(c), max_chars):
+                sub = c[i : i + max_chars].strip()
+                if sub:
+                    final_chunks.append(sub)
+        else:
+            final_chunks.append(c)
+    return final_chunks
 
 
-def split_clause_into_balanced_chunks(clause: str, max_words: int = 8, max_chars: int = 40) -> List[str]:
-    """Split a single Latin/spaced clause into balanced chunks of 5-8 words (<= 40 chars)."""
-    words = clause.split()
-    if len(words) <= max_words and len(clause) <= max_chars:
-        return [clause]
-
-    import math
-    n_chunks = max(math.ceil(len(words) / 7), math.ceil(len(clause) / max_chars))
-    words_per_chunk = math.ceil(len(words) / max(n_chunks, 1))
-
+def split_clause_into_balanced_chunks(
+    clause: str, max_words: int = 8, max_chars: int = 40
+) -> List[str]:
+    """Split English/Latin clause into balanced chunks."""
+    words = clause.strip().split()
+    if not words:
+        return []
     chunks = []
-    for i in range(0, len(words), words_per_chunk):
-        chunk_str = " ".join(words[i:i + words_per_chunk])
-        if chunk_str:
-            chunks.append(chunk_str)
+    current_words = []
+    for w in words:
+        potential_len = sum(len(x) for x in current_words) + len(current_words) + len(w)
+        if len(current_words) >= max_words or (potential_len > max_chars and current_words):
+            chunks.append(" ".join(current_words))
+            current_words = [w]
+        else:
+            current_words.append(w)
+    if current_words:
+        chunks.append(" ".join(current_words))
     return chunks
 
 
 def split_text_into_punchy_srt_chunks(
-    text: str,
-    max_words: int = 8,
-    max_chars_latin: int = 40,
-    max_chars_cjk: int = 18,
+    text: str, max_words: int = 8, max_chars: int = 40
 ) -> List[str]:
-    """
-    Split narrative text into short, punchy subtitle chunks based on sentence and clause boundaries.
-    Fully supports Latin (English/French/Spanish/Hindi) and CJK (Japanese/Chinese/Korean).
-    """
-    clean = re.sub(r"\[pause\s+[0-9.]+s?\]", "", text, flags=re.IGNORECASE).strip()
+    """Build subtitle chunk list formatted for video creators."""
+    clean = re.sub(
+        r"(\[(?:pause|break)(?:\s+|:\s*)[0-9.]+\s*(?:s|ms)?\]|<break\s+time=[\"'][0-9.]+\s*(?:s|ms)?[\"']\s*/>)",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    clean = re.sub(r"\s+", " ", clean).strip()
     if not clean:
         return []
 
-    # 1. Split on major sentence delimiters (. ! ? 。 ！？ \n ; :)
-    major_clauses = [c.strip() for c in re.split(r"(?<=[.!?。！？\n;:])\s*", clean) if c.strip()]
+    cjk_mode = is_cjk_text(clean)
+    clauses = [
+        c.strip()
+        for c in re.split(r"(?<=[.!?,;:—\n。！？，；：])\s*", clean)
+        if c.strip()
+    ]
+    if not clauses:
+        clauses = [clean]
 
-    final_chunks = []
-    for clause in major_clauses:
-        # 2. Split on comma / secondary clause delimiters (, 、 ， — –)
-        sub_parts = [p.strip() for p in re.split(r"(?<=[,、，—–])\s*", clause) if p.strip()]
-        for part in sub_parts:
-            if is_cjk_text(part):
-                # CJK mode: 12-18 characters per subtitle block
-                cjk_parts = split_cjk_clause(part, max_chars=max_chars_cjk)
-                final_chunks.extend(cjk_parts)
-            else:
-                # Latin mode: 5-8 words per subtitle block
-                latin_parts = split_clause_into_balanced_chunks(part, max_words=max_words, max_chars=max_chars_latin)
-                final_chunks.extend(latin_parts)
+    all_chunks = []
+    for cl in clauses:
+        if cjk_mode:
+            all_chunks.extend(split_cjk_clause(cl, max_chars=18))
+        else:
+            all_chunks.extend(split_clause_into_balanced_chunks(cl, max_words, max_chars))
 
-    return [c for c in final_chunks if c.strip()]
+    return all_chunks or [clean]
 
 
 def calculate_chunk_acoustic_weight(chunk: str) -> float:
-    """
-    Calculate duration weight including acoustic pauses for punctuation:
-    - Major sentence endings (。 ！ ？ ! ? . \n): +4.5 char units (breath pause ~350-450ms)
-    - Comma/clause delimiters (、 ， , ; — –): +2.2 char units (clause pause ~150-200ms)
-    """
-    base_w = float(max(len(chunk), 4))
-    if re.search(r"[。！？!?.\n]$", chunk.strip()):
-        base_w += 4.5
-    elif re.search(r"[、，,;—–]$", chunk.strip()):
-        base_w += 2.2
-    return base_w
+    """Estimate speech duration weight of a text chunk."""
+    chars = len(chunk)
+    words = len(chunk.split())
+    weight = float(max(chars, words * 4))
+    if re.search(r"[.!?。！？]$", chunk.strip()):
+        weight += 6.0
+    elif re.search(r"[,;:\-—，；：]$", chunk.strip()):
+        weight += 3.0
+    return max(weight, 2.0)
 
 
 def build_srt_subtitles(
@@ -332,60 +318,24 @@ def build_srt_subtitles(
     max_chars: int = 40,
     max_chunk_dur: float = 3.5,
 ) -> str:
-    """
-    Generate short, punchy, CapCut-compliant SRT subtitles.
-    - Latin: 5-8 words (or ~35-40 characters) per subtitle block.
-    - CJK (Japanese/Chinese): 12-18 characters per subtitle block.
-    - Acoustic pause weighting for natural sentence and clause pauses (。 ！ ？ 、).
-    - 100ms anti-flicker overlap padding between cards for smooth CapCut playback.
-    """
-    from core.multilingual_g2p import MultilingualG2P
-    g2p = MultilingualG2P()
-    raw_lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
+    """Generate perfectly synchronized SubRip (.srt) subtitles."""
+    chunks = split_text_into_punchy_srt_chunks(text, max_words, max_chars)
+    if not chunks or total_duration <= 0.05:
+        return f"1\n00:00:00,000 --> {format_srt_timestamp(max(total_duration, 1.0))}\n{text.strip()}\n"
 
-    # Check for multi-speaker dialogue lines
-    dialogue_entries = []
-    has_tags = False
-    for line in raw_lines:
-        spk, l_lang, clean_txt = g2p.parse_dialogue_line(line)
-        if spk is not None and clean_txt:
-            has_tags = True
-            dialogue_entries.append(clean_txt)
-        elif line:
-            dialogue_entries.append(line)
-
-    source_lines = dialogue_entries if has_tags else [text]
-
-    all_chunks = []
-    for s_line in source_lines:
-        line_chunks = split_text_into_punchy_srt_chunks(
-            s_line,
-            max_words=max_words,
-            max_chars_latin=max_chars,
-            max_chars_cjk=18,
-        )
-        all_chunks.extend(line_chunks)
-
-    if not all_chunks:
-        return ""
-
-    weights = [calculate_chunk_acoustic_weight(c) for c in all_chunks]
-    total_weight = sum(weights)
-
+    weights = [calculate_chunk_acoustic_weight(c) for c in chunks]
+    total_w = sum(weights)
     srt_lines = []
     current_time = 0.0
 
-    for idx, (chunk, w) in enumerate(zip(all_chunks, weights), start=1):
-        raw_dur = (w / total_weight) * total_duration
-        dur = min(max(raw_dur, 0.6), max_chunk_dur)
+    for idx, (chunk, w) in enumerate(zip(chunks, weights), 1):
+        dur = (w / total_w) * total_duration
+        dur = min(dur, max_chunk_dur)
+        if idx == len(chunks):
+            dur = max(0.2, total_duration - current_time)
 
         start_ts = format_srt_timestamp(current_time)
-
-        # 100ms anti-flicker overlap padding prevents subtitle flicker between cuts in CapCut
-        overlap_padding = 0.100 if idx < len(all_chunks) else 0.0
-        end_time = min(current_time + dur + overlap_padding, total_duration)
-        end_ts = format_srt_timestamp(end_time)
-
+        end_ts = format_srt_timestamp(min(current_time + dur, total_duration))
         srt_lines.append(f"{idx}\n{start_ts} --> {end_ts}\n{chunk}\n")
         current_time = min(current_time + dur, total_duration)
 
@@ -393,7 +343,7 @@ def build_srt_subtitles(
 
 
 # ============================================================================
-# Background Worker Process (Runs in separate OS Process)
+# Background Worker Process (Isolated OS Process)
 # ============================================================================
 
 def _engine_worker_loop(
@@ -401,13 +351,14 @@ def _engine_worker_loop(
     response_queue: mp.Queue,
     model_dir: str,
     output_dir: str,
+    cancellation_dict: Any,
+    worker_name: str = "worker",
 ) -> None:
     """
-    Worker process entry point.
-    Loads ONNX weights & G2P models without blocking the main FastAPI process,
-    then continuously listens for rendering tasks over IPC queues.
+    Dedicated background worker process.
+    Loads ONNX weights with 2 intra-op threads and executes synthesis tasks.
+    Supports cooperative disconnect cancellation at pipeline checkpoints.
     """
-    # Configure UTF-8 encoding for Windows child processes
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8")
@@ -418,19 +369,17 @@ def _engine_worker_loop(
     out_path.mkdir(parents=True, exist_ok=True)
 
     try:
-        # Import and initialize heavy engine inside the worker process
         from core.kokoro_engine import KokoroStudioEngine
         engine = KokoroStudioEngine(model_dir=Path(model_dir))
         engine.load_model()
-
-        # Signal ready state to main process
-        response_queue.put({"type": "INIT_DONE", "success": True})
+        response_queue.put({"type": "INIT_DONE", "worker": worker_name, "success": True})
+        logger.info(f"Kokoro Engine worker [{worker_name}] initialized successfully.")
     except Exception as e:
         err_msg = f"{type(e).__name__}: {str(e) or repr(e)}"
-        response_queue.put({"type": "INIT_DONE", "success": False, "error": err_msg})
+        response_queue.put({"type": "INIT_DONE", "worker": worker_name, "success": False, "error": err_msg})
+        logger.error(f"Kokoro Engine worker [{worker_name}] initialization failed: {err_msg}")
         return
 
-    # Main IPC task loop
     while True:
         try:
             task = task_queue.get()
@@ -438,146 +387,223 @@ def _engine_worker_loop(
                 continue
 
             msg_type = task.get("type", "RENDER")
-
-            # Check shutdown signal
             if msg_type == "STOP":
+                logger.info(f"Worker [{worker_name}] received STOP signal. Exiting.")
                 break
 
             req_id = task.get("id")
+            is_job = task.get("is_job", False)
+            job_id = task.get("job_id")
+            device_id = task.get("device_id", "dev_anonymous")
+
+            # Checkpoint 0: Cancelled before pickup
+            if cancellation_dict.get(req_id, False) or (job_id and cancellation_dict.get(job_id, False)):
+                logger.info(f"Task {req_id or job_id} cancelled prior to worker execution.")
+                response_queue.put({
+                    "type": "JOB_DONE" if is_job else "RENDER_DONE",
+                    "id": req_id,
+                    "job_id": job_id,
+                    "device_id": device_id,
+                    "success": False,
+                    "cancelled": True,
+                    "error": "Synthesis cancelled before execution",
+                })
+                continue
+
+            def cancellation_check() -> bool:
+                if cancellation_dict.get(req_id, False):
+                    return True
+                if job_id and cancellation_dict.get(job_id, False):
+                    return True
+                return False
+
             text = task.get("text", "")
             voice_id = task.get("voice_id", "af_bella")
             speed = float(task.get("speed", 1.0))
             lang = task.get("lang", "auto")
             eq_preset = task.get("eq_preset", "Clean Studio (Default)")
             out_format = task.get("output_format", "wav").lower().strip()
-            punc_ms = int(task.get("pause_punctuation_ms", 150))
-            para_ms = int(task.get("pause_paragraph_ms", 400))
 
-            # 1. Synthesize audio with multilingual G2P
-            samples, sr = engine.synthesize_text(
-                text=text,
-                voice=voice_id,
-                speed=speed,
-                lang=lang,
-                master_preset="Raw Unprocessed",
-            )
+            try:
+                # Checkpoint 1: In-synthesis check
+                samples, sr = engine.synthesize_text(
+                    text=text,
+                    voice=voice_id,
+                    speed=speed,
+                    lang=lang,
+                    master_preset="Raw Unprocessed",
+                    cancellation_check=cancellation_check,
+                )
 
-            # Master audio with selected EQ preset
-            audio_seg = engine.numpy_to_audiosegment(samples, sr)
-            if eq_preset != "Raw Unprocessed":
-                audio_seg = engine.apply_studio_mastering(audio_seg, preset=eq_preset)
+                # Checkpoint 2: Post-synthesis / Pre-mastering check
+                if cancellation_check():
+                    raise RuntimeError("Synthesis cancelled by client disconnect")
 
-            dur = float(len(audio_seg) / 1000.0)
+                audio_seg = engine.numpy_to_audiosegment(samples, sr)
+                if eq_preset != "Raw Unprocessed":
+                    audio_seg = engine.apply_studio_mastering(audio_seg, preset=eq_preset)
 
-            # 2. Build smart, punchy SRT subtitles (hard limit of 7-9 words / <= 40 chars / <= 3.5s per line)
-            srt_content = build_srt_subtitles(
-                text=text,
-                total_duration=dur,
-                max_words=8,
-                max_chars=40,
-                max_chunk_dur=3.5,
-            )
+                # Checkpoint 3: Pre-export check
+                if cancellation_check():
+                    raise RuntimeError("Synthesis cancelled by client disconnect")
 
-            # 3. Save audio file to output directory
-            file_ext = "mp3" if out_format == "mp3" else "wav"
-            safe_voice = re.sub(r"[^\w\-]", "_", voice_id)
-            base_name = f"kokoro_{safe_voice}_{uuid.uuid4().hex[:8]}"
-            filename = f"{base_name}.{file_ext}"
-            file_dest = out_path / filename
+                dur = float(len(audio_seg) / 1000.0)
+                srt_content = build_srt_subtitles(
+                    text=text,
+                    total_duration=dur,
+                    max_words=8,
+                    max_chars=40,
+                    max_chunk_dur=3.5,
+                )
 
-            # Export mastered audio
-            engine.export_audio(audio_seg, output_path=file_dest, format=file_ext)
+                # Checkpoint 4: Final pre-write check
+                if cancellation_check():
+                    raise RuntimeError("Synthesis cancelled by client disconnect")
 
-            # Save synchronized SRT subtitle file
-            srt_filename = f"{base_name}.srt"
-            srt_dest = out_path / srt_filename
-            with open(srt_dest, "w", encoding="utf-8") as f:
-                f.write(srt_content)
+                # Generate 128-bit secure identifier
+                token_id = secrets.token_urlsafe(16)
+                safe_voice = re.sub(r"[^\w\-]", "_", voice_id)
+                base_name = f"kokoro_{safe_voice}_{token_id}"
+                file_ext = "mp3" if out_format == "mp3" else "wav"
+                filename = f"{base_name}.{file_ext}"
+                file_dest = out_path / filename
 
-            file_size = os.path.getsize(file_dest)
+                engine.export_audio(audio_seg, output_path=file_dest, format=file_ext)
 
-            # Read audio file to base64 for instant in-memory browser playback without IDM interception
-            with open(file_dest, "rb") as f:
-                audio_b64 = base64.b64encode(f.read()).decode("ascii")
+                srt_filename = f"{base_name}.srt"
+                srt_dest = out_path / srt_filename
+                with open(srt_dest, "w", encoding="utf-8") as f:
+                    f.write(srt_content)
 
-            # Determine voice name and resolved language
-            v_meta = VOICE_CATALOG.get(voice_id, {})
-            voice_name = v_meta.get("name", voice_id)
-            resolved_lang = lang if lang != "auto" else v_meta.get("lang", "en-us")
+                file_size = os.path.getsize(file_dest)
 
-            # Send successful response with SRT data
-            response_queue.put({
-                "type": "RENDER_DONE",
-                "id": req_id,
-                "success": True,
-                "audio_path": str(file_dest.resolve()),
-                "filename": filename,
-                "duration": round(dur, 2),
-                "sample_rate": sr,
-                "file_size_bytes": file_size,
-                "voice_id": voice_id,
-                "voice_name": voice_name,
-                "lang_resolved": resolved_lang,
-                "eq_preset": eq_preset,
-                "audio_base64": audio_b64,
-                "srt_content": srt_content,
-                "srt_filename": srt_filename,
-            })
+                # Base64 for instant browser audio playback
+                audio_b64 = None
+                if file_size < 10 * 1024 * 1024:  # Only for files under 10MB
+                    with open(file_dest, "rb") as f:
+                        import base64
+                        audio_b64 = base64.b64encode(f.read()).decode("ascii")
 
-        except Exception as err:
-            response_queue.put({
-                "type": "RENDER_DONE",
-                "id": task.get("id") if isinstance(task, dict) else None,
-                "success": False,
-                "error": str(err),
-            })
+                v_meta = VOICE_CATALOG.get(voice_id, {})
+                voice_name = v_meta.get("name", voice_id)
+                resolved_lang = lang if lang != "auto" else v_meta.get("lang", "en-us")
+
+                response_queue.put({
+                    "type": "JOB_DONE" if is_job else "RENDER_DONE",
+                    "id": req_id,
+                    "job_id": job_id,
+                    "device_id": device_id,
+                    "success": True,
+                    "cancelled": False,
+                    "audio_path": str(file_dest.resolve()),
+                    "filename": filename,
+                    "base_name": base_name,
+                    "file_ext": file_ext,
+                    "duration": round(dur, 2),
+                    "sample_rate": sr,
+                    "file_size_bytes": file_size,
+                    "voice_id": voice_id,
+                    "voice_name": voice_name,
+                    "lang_resolved": resolved_lang,
+                    "eq_preset": eq_preset,
+                    "audio_base64": audio_b64,
+                    "srt_content": srt_content,
+                    "srt_filename": srt_filename,
+                })
+
+            except Exception as task_err:
+                is_cancelled = "cancelled" in str(task_err).lower()
+                response_queue.put({
+                    "type": "JOB_DONE" if is_job else "RENDER_DONE",
+                    "id": req_id,
+                    "job_id": job_id,
+                    "device_id": device_id,
+                    "success": False,
+                    "cancelled": is_cancelled,
+                    "error": str(task_err),
+                })
+
+        except Exception as queue_err:
+            logger.error(f"Worker [{worker_name}] queue loop error: {queue_err}")
 
 
 # ============================================================================
-# Process Manager (Async Bridge in FastAPI)
+# Dual-Worker Process Manager (Async Bridge in FastAPI)
 # ============================================================================
 
 class EngineProcessManager:
     """
-    Manages the lifecycle of the isolated background worker process,
-    tracks pending asynchronous render requests with Futures, and enforces timeouts.
+    Manages dual background workers:
+    - Worker 1: Interactive synchronous renders (queue bounded at 20)
+    - Worker 2: Long-running Pro batch jobs (queue bounded at 50)
+    Tracks futures and coordinates shared cross-process disconnect cancellations.
     """
 
     def __init__(self):
-        self.task_queue: Optional[mp.Queue] = None
+        self.sync_queue: Optional[mp.Queue] = None
+        self.batch_queue: Optional[mp.Queue] = None
         self.response_queue: Optional[mp.Queue] = None
-        self.worker_process: Optional[mp.Process] = None
+        self.mp_manager: Optional[Any] = None
+        self.cancellation_dict: Optional[Any] = None
+        self.worker_sync: Optional[mp.Process] = None
+        self.worker_batch: Optional[mp.Process] = None
         self.is_ready: bool = False
         self.init_error: Optional[str] = None
         self._pending_requests: Dict[str, asyncio.Future] = {}
         self._listener_thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._ready_workers: Set[str] = set()
 
     def start(self, loop: asyncio.AbstractEventLoop) -> None:
-        """Start the isolated background process and response listener."""
+        """Start dual workers and the IPC response listener."""
+        import threading
         self._loop = loop
-        self.task_queue = mp.Queue()
+        self.sync_queue = mp.Queue(maxsize=MAX_INTERACTIVE_QUEUE)
+        self.batch_queue = mp.Queue(maxsize=MAX_BATCH_QUEUE)
         self.response_queue = mp.Queue()
 
-        self.worker_process = mp.Process(
+        self.mp_manager = mp.Manager()
+        self.cancellation_dict = self.mp_manager.dict()
+
+        # Worker 1: Interactive Short Renders
+        self.worker_sync = mp.Process(
             target=_engine_worker_loop,
             args=(
-                self.task_queue,
+                self.sync_queue,
                 self.response_queue,
                 str(ASSETS_DIR),
                 str(OUTPUT_DIR),
+                self.cancellation_dict,
+                "worker_sync",
             ),
             daemon=True,
         )
-        self.worker_process.start()
-        logger.info(f"Spawned Kokoro Engine background worker process (PID: {self.worker_process.pid})")
+        self.worker_sync.start()
 
-        # Start response listener thread
+        # Worker 2: Pro Batch Jobs
+        self.worker_batch = mp.Process(
+            target=_engine_worker_loop,
+            args=(
+                self.batch_queue,
+                self.response_queue,
+                str(ASSETS_DIR),
+                str(OUTPUT_DIR),
+                self.cancellation_dict,
+                "worker_batch",
+            ),
+            daemon=True,
+        )
+        self.worker_batch.start()
+
+        logger.info(
+            f"Spawned dual Kokoro Engine workers: Sync PID {self.worker_sync.pid}, Batch PID {self.worker_batch.pid}"
+        )
+
         self._listener_thread = threading.Thread(target=self._response_listener, daemon=True)
         self._listener_thread.start()
 
     def _response_listener(self) -> None:
-        """Reads responses from child process and resolves asyncio Futures in the main event loop."""
+        """Reads responses from worker processes and resolves Futures or updates DB records."""
         while True:
             try:
                 if self.response_queue is None:
@@ -586,35 +612,81 @@ class EngineProcessManager:
                 if not isinstance(msg, dict):
                     continue
 
-                msg_type = msg.get("type")
+                m_type = msg.get("type")
 
-                # Initial loading state update
-                if msg_type == "INIT_DONE":
+                if m_type == "INIT_DONE":
+                    w_name = msg.get("worker", "worker")
                     if msg.get("success"):
-                        self.is_ready = True
-                        logger.info("Kokoro ONNX Model & Voices loaded successfully in background worker!")
+                        self._ready_workers.add(w_name)
+                        logger.info(f"Worker [{w_name}] reported READY.")
+                        if len(self._ready_workers) >= 1:
+                            self.is_ready = True
                     else:
-                        self.init_error = msg.get("error", "Unknown initialization failure")
-                        logger.error(f"Kokoro Engine worker initialization failed: {self.init_error}")
+                        self.init_error = msg.get("error", "Unknown worker init error")
+                        logger.error(f"Worker [{w_name}] failed: {self.init_error}")
                     continue
 
-                # Rendering task completion
-                if msg_type == "RENDER_DONE":
+                if m_type == "RENDER_DONE":
                     req_id = msg.get("id")
                     if req_id and req_id in self._pending_requests:
-                        future = self._pending_requests.pop(req_id)
-                        if not future.done() and self._loop:
-                            self._loop.call_soon_threadsafe(future.set_result, msg)
+                        fut = self._pending_requests.pop(req_id)
+                        if not fut.done() and self._loop:
+                            self._loop.call_soon_threadsafe(fut.set_result, msg)
+                    continue
+
+                if m_type == "JOB_DONE":
+                    job_id = msg.get("job_id")
+                    device_id = msg.get("device_id")
+                    if job_id:
+                        if msg.get("success"):
+                            filename = msg.get("filename")
+                            base_name = msg.get("base_name")
+                            file_ext = msg.get("file_ext", "wav")
+                            file_size = msg.get("file_size_bytes", 0)
+                            audio_url = f"/audio/{filename}"
+
+                            # Record artifact ownership
+                            billing_db.record_audio_artifact(
+                                file_id=base_name,
+                                device_id=device_id,
+                                filename=filename,
+                                format=file_ext,
+                                file_size=file_size,
+                                ttl_seconds=DEFAULT_ARTIFACT_TTL,
+                            )
+                            billing_db.update_tts_job(
+                                job_id=job_id,
+                                status="COMPLETED",
+                                filename=filename,
+                                audio_url=audio_url,
+                                progress=1.0,
+                            )
+                            logger.info(f"Async Job {job_id} COMPLETED for device {device_id}")
+                        elif msg.get("cancelled"):
+                            billing_db.update_tts_job(
+                                job_id=job_id,
+                                status="CANCELLED",
+                                error_message="Job was cancelled",
+                            )
+                            logger.info(f"Async Job {job_id} CANCELLED")
+                        else:
+                            billing_db.update_tts_job(
+                                job_id=job_id,
+                                status="FAILED",
+                                error_message=msg.get("error", "Rendering error"),
+                            )
+                            logger.warning(f"Async Job {job_id} FAILED: {msg.get('error')}")
+                    continue
 
             except Exception as e:
                 logger.error(f"Error in response listener thread: {e}")
                 break
 
-    async def render_async(self, payload: Dict[str, Any], timeout_sec: float = 600.0) -> Dict[str, Any]:
-        """
-        Submits a rendering task to the background process and awaits result with dynamic timeout.
-        """
-        if self.init_error:
+    async def render_sync_async(
+        self, payload: Dict[str, Any], timeout_sec: float = 240.0
+    ) -> Dict[str, Any]:
+        """Submits task to Worker 1 (interactive queue bounded at 20)."""
+        if self.init_error and not self.is_ready:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Engine worker failed to initialize: {self.init_error}",
@@ -623,78 +695,155 @@ class EngineProcessManager:
         if not self.is_ready:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Kokoro model is currently loading in background process. Please retry in a few seconds.",
+                detail="Kokoro model is loading in background. Please retry in a few moments.",
             )
 
-        req_id = str(uuid.uuid4())
+        req_id = payload.get("id") or str(uuid.uuid4())
         payload["id"] = req_id
         payload["type"] = "RENDER"
+        payload["is_job"] = False
 
         future = self._loop.create_future()
         self._pending_requests[req_id] = future
 
-        # Send task to child process queue
-        self.task_queue.put(payload)
+        try:
+            self.sync_queue.put_nowait(payload)
+        except queue.Full:
+            self._pending_requests.pop(req_id, None)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Interactive TTS queue is full (max 20 concurrent tasks). Please try again shortly.",
+            )
 
         try:
             result = await asyncio.wait_for(future, timeout=timeout_sec)
+            if result.get("cancelled"):
+                raise HTTPException(
+                    status_code=499,
+                    detail="Synthesis cancelled by client disconnect",
+                )
             if not result.get("success"):
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=result.get("error", "Speech rendering failed inside engine worker"),
                 )
             return result
-
         except asyncio.TimeoutError:
+            self.cancellation_dict[req_id] = True
             self._pending_requests.pop(req_id, None)
             raise HTTPException(
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail=f"Audio rendering timed out after {timeout_sec} seconds. Try shorter text or faster speech speed.",
+                detail=f"Audio rendering timed out after {timeout_sec}s. Try a shorter script or faster speed.",
+            )
+        except asyncio.CancelledError:
+            self.cancellation_dict[req_id] = True
+            self._pending_requests.pop(req_id, None)
+            raise
+
+    def submit_batch_job(self, payload: Dict[str, Any]) -> None:
+        """Submits long-form async task to Worker 2 (batch queue bounded at 50)."""
+        if not self.is_ready:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Kokoro model is loading in background. Please retry in a few moments.",
+            )
+
+        payload["type"] = "RENDER"
+        payload["is_job"] = True
+
+        try:
+            self.batch_queue.put_nowait(payload)
+        except queue.Full:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Batch job queue is full (max 50 queued tasks). Please try again shortly.",
             )
 
     def shutdown(self) -> None:
-        """Gracefully terminate background process on server shutdown."""
-        logger.info("Shutting down Kokoro Engine worker process...")
-        if self.task_queue:
+        """Gracefully terminate background workers on server shutdown."""
+        logger.info("Shutting down Kokoro Engine workers...")
+        for q in (self.sync_queue, self.batch_queue):
+            if q:
+                try:
+                    q.put({"type": "STOP"})
+                except Exception:
+                    pass
+
+        for w in (self.worker_sync, self.worker_batch):
+            if w and w.is_alive():
+                w.terminate()
+                w.join(timeout=2.0)
+
+        if self.mp_manager:
             try:
-                self.task_queue.put({"type": "STOP"})
+                self.mp_manager.shutdown()
             except Exception:
                 pass
-        if self.worker_process and self.worker_process.is_alive():
-            self.worker_process.terminate()
-            self.worker_process.join(timeout=2.0)
 
-
-# Global process manager instance
+# Global engine manager instance
 engine_manager = EngineProcessManager()
 
 
 # ============================================================================
-# FastAPI Application & Lifespan
+# Background Retention Task & FastAPI Lifespan
 # ============================================================================
+
+async def audio_retention_loop():
+    """Application-aware artifact retention worker: runs every 15 mins."""
+    while True:
+        try:
+            await asyncio.sleep(900)  # 15 minutes
+            cleaned = billing_db.cleanup_expired_artifacts(OUTPUT_DIR, max_age_seconds=DEFAULT_ARTIFACT_TTL)
+            if cleaned > 0:
+                logger.info(f"Audio Retention: Pruned {cleaned} expired audio files (>2h old).")
+
+            # Emergency disk check: if free disk < 5GB, prune files older than 30 mins
+            total, used, free = shutil.disk_usage(OUTPUT_DIR)
+            if free < 5 * 1024 * 1024 * 1024:
+                logger.warning(f"Disk space low ({free // (1024*1024)} MB free). Running emergency prune (>30m).")
+                billing_db.cleanup_expired_artifacts(OUTPUT_DIR, max_age_seconds=1800)
+        except asyncio.CancelledError:
+            break
+        except Exception as err:
+            logger.error(f"Error in audio retention loop: {err}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start background process on server startup and shut down on exit."""
+    """Start workers and retention loop on startup; shut down on exit."""
     loop = asyncio.get_running_loop()
     engine_manager.start(loop)
+    cleanup_task = asyncio.create_task(audio_retention_loop())
     yield
+    cleanup_task.cancel()
     engine_manager.shutdown()
 
 
+# ============================================================================
+# FastAPI Application & Restricted CORS Configuration
+# ============================================================================
+
 app = FastAPI(
     title="Kokoro Voice Studio Pro — Backend API",
-    description="Standalone, high-performance multilingual TTS & mastering backend powered by Kokoro-82M ONNX.",
-    version="2.5.0",
+    description="Production hardened multilingual TTS & mastering backend powered by Kokoro-82M ONNX.",
+    version="2.6.0",
     lifespan=lifespan,
 )
 
-# 1. Enable Universal CORS Middleware (Tauri, React, Localhost, Mobile, Extensions)
+# Strict CORS origin allowlist (disallows wildcard with credentials)
+ALLOWED_ORIGINS = [
+    "https://saytts.site",
+    "https://www.saytts.site",
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["*"],
 )
 
@@ -710,7 +859,64 @@ def get_client_ip(request: Request) -> str:
 
 
 # ============================================================================
-# REST API Endpoints & Static SPA Delivery
+# Authentication Middleware & Dependency Layer
+# ============================================================================
+
+class SessionAuth:
+    """
+    Dependency that authenticates server-issued anonymous sessions.
+    Validates HttpOnly 'saytts_session' cookie or 'X-Device-Token' header.
+    Never trusts client-supplied device_id for authorization.
+    """
+
+    def __init__(self, auto_error: bool = True):
+        self.auto_error = auto_error
+
+    async def __call__(self, request: Request) -> Optional[Dict[str, Any]]:
+        token = request.headers.get("X-Device-Token") or request.headers.get("x-device-token")
+        if not token:
+            token = request.cookies.get(COOKIE_NAME)
+        if not token:
+            auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+            if auth_header and auth_header.lower().startswith("bearer "):
+                bearer_val = auth_header[7:].strip()
+                if not bearer_val.startswith("sk_"):
+                    token = bearer_val
+
+        if not token:
+            if self.auto_error:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Authentication required. Please initialize a session via POST /v1/auth/session.",
+                )
+            return None
+
+        is_valid, device_id, session_record = billing_db.authenticate_session(token)
+        if not is_valid or not device_id:
+            if self.auto_error:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or expired session. Please refresh your session via POST /v1/auth/session.",
+                )
+            return None
+
+        dev_quota = billing_db.get_device_quota(device_id)
+        session = {
+            "session_id": session_record.get("session_id", "") if session_record else "",
+            "device_id": device_id,
+            "is_pro": dev_quota.get("tier") == "pro",
+            "tier": dev_quota.get("tier", "free"),
+        }
+        request.state.session = session
+        request.state.device_id = device_id
+        return session
+
+get_current_session = SessionAuth(auto_error=True)
+get_optional_session = SessionAuth(auto_error=False)
+
+
+# ============================================================================
+# Static SPA Delivery & Health
 # ============================================================================
 
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
@@ -728,93 +934,45 @@ async def root_spa():
         return FileResponse(
             path=str(index_file),
             media_type="text/html",
-            headers={"Cache-Control": "no-cache"},
+            headers={"Cache-Control": "no-cache, must-revalidate"},
         )
-    return {
-        "app": "Kokoro Voice Studio Pro API",
-        "version": "2.5.0",
-        "status": "ready" if engine_manager.is_ready else ("error" if engine_manager.init_error else "loading"),
+    return JSONResponse({
+        "name": "Kokoro Voice Studio",
+        "status": "online",
+        "version": "2.6.0",
         "docs_url": "/docs",
-        "health_url": "/health",
-        "render_url": "/render",
-    }
-
+    })
 
 @app.api_route("/legal", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/legal/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
-async def legal_spa_route(path: str = ""):
-    """Serves the production React Legal Center for direct URL navigation and page refreshes."""
+async def legal_spa(path: str = ""):
     index_file = FRONTEND_DIST / "index.html"
     if index_file.exists():
-        return FileResponse(
-            path=str(index_file),
-            media_type="text/html",
-            headers={"Cache-Control": "no-cache"},
-        )
+        return FileResponse(path=str(index_file), media_type="text/html")
     return RedirectResponse(url="/")
 
-
 @app.get("/api", summary="API Overview")
-async def api_overview():
-    """Returns basic server information and status."""
+async def api_info():
     return {
-        "app": "Kokoro Voice Studio Pro API",
-        "version": "2.5.0",
-        "status": "ready" if engine_manager.is_ready else ("error" if engine_manager.init_error else "loading"),
-        "docs_url": "/docs",
-        "health_url": "/health",
-        "render_url": "/render",
+        "title": "Kokoro Voice Studio Pro API",
+        "version": "2.6.0",
+        "status": "operational",
+        "endpoints": {
+            "health": "GET /health",
+            "auth_session": "POST /v1/auth/session",
+            "render": "POST /render",
+            "jobs": "POST /v1/tts/jobs",
+            "quota": "GET /v1/user/quota",
+            "developer_keys": "GET/POST /v1/developer/keys",
+            "openai_tts": "POST /v1/audio/speech",
+        },
     }
-
-
-@app.get("/icon.png", summary="Application Icon (PNG)")
-@app.get("/favicon.png", include_in_schema=False)
-@app.get("/favicon-32x32.png", include_in_schema=False)
-@app.get("/favicon-16x16.png", include_in_schema=False)
-@app.get("/favicon-48x48.png", include_in_schema=False)
-@app.get("/apple-touch-icon.png", include_in_schema=False)
-async def serve_icon_png(request: Request):
-    path_name = request.url.path.lstrip("/")
-    for p in [FRONTEND_DIST / path_name, FRONTEND_DIST / "favicon.png", FRONTEND_DIST / "icon.png", BASE_DIR / "icon.png"]:
-        if p.exists():
-            return FileResponse(p, media_type="image/png")
-    raise HTTPException(status_code=404, detail="Icon not found")
-
-
-@app.get("/favicon.ico", include_in_schema=False)
-@app.get("/icon.ico", summary="Application Favicon (ICO)")
-async def serve_icon_ico():
-    for p in [FRONTEND_DIST / "favicon.ico", FRONTEND_DIST / "icon.ico", BASE_DIR / "icon.ico"]:
-        if p.exists():
-            return FileResponse(p, media_type="image/x-icon")
-    raise HTTPException(status_code=404, detail="Icon not found")
-
-
-@app.get("/robots.txt", include_in_schema=False)
-async def serve_robots_txt():
-    for p in [FRONTEND_DIST / "robots.txt", BASE_DIR / "frontend" / "public" / "robots.txt", Path("robots.txt")]:
-        if p.exists():
-            return FileResponse(p, media_type="text/plain")
-    raise HTTPException(status_code=404, detail="robots.txt not found")
-
-
-@app.get("/sitemap.xml", include_in_schema=False)
-async def serve_sitemap_xml():
-    for p in [FRONTEND_DIST / "sitemap.xml", BASE_DIR / "frontend" / "public" / "sitemap.xml", Path("sitemap.xml")]:
-        if p.exists():
-            return FileResponse(p, media_type="application/xml")
-    raise HTTPException(status_code=404, detail="sitemap.xml not found")
-
 
 @app.get("/health", response_model=HealthResponse, summary="Engine Health & Voice Catalog")
 async def health_check():
-    """
-    Non-blocking endpoint returning engine initialization state,
-    supported languages, mastering presets, and all 60 catalog voices.
-    """
+    """Returns engine readiness state, supported languages, mastering presets, and voice catalog."""
     engine_status = "ready" if engine_manager.is_ready else ("error" if engine_manager.init_error else "loading")
 
-    # Format 60 voices catalog metadata
     voices_list: List[VoiceMetadata] = []
     for vid, vdata in VOICE_CATALOG.items():
         voices_list.append(
@@ -829,7 +987,6 @@ async def health_check():
             )
         )
 
-    # Distinct supported languages
     languages = [
         {"code": "auto", "name": "🌐 Auto-Detect Language", "flag": "🌐"},
         {"code": "en-us", "name": "English (US)", "flag": "🇺🇸"},
@@ -846,7 +1003,7 @@ async def health_check():
 
     return HealthResponse(
         status=engine_status,
-        version="2.5.0",
+        version="2.6.0",
         model_loaded=engine_manager.is_ready,
         voices_count=len(VOICE_CATALOG),
         output_directory=str(OUTPUT_DIR.resolve()),
@@ -856,169 +1013,220 @@ async def health_check():
     )
 
 
-@app.post("/render", response_model=RenderResponse, summary="Synthesize Text to Mastered Audio")
-async def render_audio(req: RenderRequest, request: Request, response: Response):
+# ============================================================================
+# Session Management Endpoints (Zero-Login Architecture)
+# ============================================================================
+
+@app.post("/v1/auth/session", summary="Initialize or Refresh Anonymous Authenticated Session")
+async def create_or_refresh_session(request: Request, response: Response):
     """
-    Synthesize input text into speech with selected voice, speed, language, and EQ mastering preset.
-    Enforces 30,000 characters/month for free-tier devices while granting unlimited access to Pro devices.
+    Issues a server-generated anonymous session.
+    Sets HttpOnly, Secure, SameSite=Lax cookie and returns token for API clients.
+    Enforces IP velocity limit: max 3 new sessions per IP per 24 hours.
     """
-    # 1. Device identification, fingerprinting & monthly quota enforcement
-    device_id = (
-        request.headers.get("x-device-id")
-        or request.headers.get("X-Device-Id")
-        or req.device_id
-        or "dev_anonymous"
-    )
-    fingerprint = (
-        request.headers.get("x-device-fingerprint")
-        or request.headers.get("X-Device-Fingerprint")
-        or ""
-    )
     client_ip = get_client_ip(request)
-    text_len = len(req.text or "")
+    user_agent = request.headers.get("user-agent", "")
 
-    allowed, quota_info, quota_msg = billing_db.check_and_consume_quota(
-        device_id=device_id,
-        char_count=text_len,
-        voice_id=req.voice_id,
-        fingerprint=fingerprint,
-        client_ip=client_ip,
-    )
+    is_secure = (request.url.scheme == "https") or (request.headers.get("x-forwarded-proto", "").lower() == "https")
 
-    if not allowed:
+    # Check for existing valid session token
+    existing_token = request.cookies.get(COOKIE_NAME) or request.headers.get("X-Device-Token") or request.headers.get("x-device-token")
+    if existing_token:
+        is_valid, dev_id, session_rec = billing_db.authenticate_session(existing_token)
+        if is_valid and dev_id:
+            quota = billing_db.get_device_quota(dev_id)
+            # Re-set cookie with fresh expiration
+            response.set_cookie(
+                key=COOKIE_NAME,
+                value=existing_token,
+                max_age=31536000,
+                httponly=True,
+                secure=is_secure,
+                samesite="lax",
+                path="/",
+            )
+            rec_key = billing_db.generate_recovery_key(dev_id)
+            return {
+                "device_id": dev_id,
+                "token": existing_token,
+                "session_token": existing_token,
+                "recovery_key": rec_key,
+                "is_pro": quota.get("tier") == "pro",
+                "message": "Existing active session verified.",
+            }
+
+    # Layer 2 Anti-Abuse: IP Rate Limit
+    if not billing_db.can_create_device_session(client_ip):
         raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "error": "quota_exceeded",
-                "message": quota_msg,
-                "quota": quota_info,
-            },
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many new sessions created from this IP address today. Please try again later.",
         )
 
-    # Attach quota headers
-    response.headers["X-User-Tier"] = quota_info.get("tier", "free")
-    response.headers["X-Quota-Usage"] = str(quota_info.get("monthly_usage", 0))
-    response.headers["X-Quota-Remaining"] = str(quota_info.get("remaining_chars", "unlimited"))
+    session_id, new_token, quota_info = billing_db.create_device_session(
+        device_id=None,
+        client_ip=client_ip,
+        user_agent=user_agent,
+    )
+    new_device_id = quota_info.get("device_id")
 
-    # Validate voice ID
-    if req.voice_id not in VOICE_CATALOG:
-        # Fallback to af_bella if unknown
-        logger.warning(f"Requested voice '{req.voice_id}' not found in catalog, using 'af_bella'")
-        req.voice_id = "af_bella"
-
-    # Validate EQ preset
-    if req.eq_preset not in MASTERING_PRESETS:
-        req.eq_preset = "Clean Studio (Default)"
-
-    # Dispatch to background process with generous dynamic timeout (10-20 minutes for long scripts)
-    dynamic_timeout = max(600.0, float(text_len * 4.0))
-    result = await engine_manager.render_async(req.model_dump(), timeout_sec=dynamic_timeout)
-
-    filename = result["filename"]
-    # Build relative / absolute audio URL
-    base_url = str(request.base_url).rstrip("/")
-    audio_url = f"{base_url}/audio/{filename}"
-
-    return RenderResponse(
-        success=True,
-        audio_path=result["audio_path"],
-        audio_url=audio_url,
-        filename=filename,
-        duration=result["duration"],
-        sample_rate=result["sample_rate"],
-        file_size_bytes=result["file_size_bytes"],
-        voice_id=result["voice_id"],
-        voice_name=result["voice_name"],
-        lang_resolved=result["lang_resolved"],
-        eq_preset=result["eq_preset"],
-        audio_base64=result.get("audio_base64"),
-        srt_content=result.get("srt_content"),
-        srt_filename=result.get("srt_filename"),
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=new_token,
+        max_age=31536000,
+        httponly=True,
+        secure=is_secure,
+        samesite="lax",
+        path="/",
     )
 
+    rec_key = billing_db.generate_recovery_key(new_device_id)
+
+    return {
+        "device_id": new_device_id,
+        "token": new_token,
+        "session_token": new_token,
+        "recovery_key": rec_key,
+        "is_pro": False,
+        "message": "Anonymous session created successfully.",
+    }
+
+@app.post("/v1/auth/recover", summary="Recover Pro Account using 192-Bit Recovery Key")
+async def recover_account_endpoint(req: RecoverAccountRequest, request: Request, response: Response):
+    """
+    Restores zero-login account access using high-entropy recovery key.
+    Stores only SHA-256 hash at rest. Issues fresh session on success.
+    """
+    client_ip = get_client_ip(request)
+    user_agent = request.headers.get("user-agent", "")
+    is_secure = (request.url.scheme == "https") or (request.headers.get("x-forwarded-proto", "").lower() == "https")
+
+    success, message, result_data = billing_db.recover_account(
+        req.recovery_key.strip(), client_ip=client_ip, user_agent=user_agent
+    )
+    if not success or not result_data:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=message or "Invalid or unrecognized recovery key.",
+        )
+
+    device_id = result_data["device_id"]
+    new_token = result_data["session_token"]
+
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=new_token,
+        max_age=31536000,
+        httponly=True,
+        secure=is_secure,
+        samesite="lax",
+        path="/",
+    )
+
+    quota = result_data.get("quota") or billing_db.get_device_quota(device_id)
+    return {
+        "success": True,
+        "device_id": device_id,
+        "token": new_token,
+        "is_pro": quota.get("tier") == "pro",
+        "message": "Account recovered successfully.",
+    }
+
+@app.post("/v1/auth/reset", summary="Revoke Active Session")
+async def reset_session_endpoint(request: Request, response: Response):
+    """Revokes active session token and clears cookie."""
+    token = request.cookies.get(COOKIE_NAME) or request.headers.get("X-Device-Token") or request.headers.get("x-device-token")
+    if token:
+        billing_db.revoke_session(token)
+    response.delete_cookie(key=COOKIE_NAME, path="/")
+    return {"success": True, "message": "Session revoked."}
+
 
 # ============================================================================
-# Quota, Promo Code & Billing Endpoints (Zero-Login Architecture)
+# Quota, Promo Code & Billing Endpoints (Server-Authorized)
 # ============================================================================
 
-@app.get("/v1/user/quota", summary="Get Device Character Quota & Subscription Status")
+@app.get("/v1/user/quota", summary="Get Character Quota & Subscription Status")
 @app.get("/user/quota", include_in_schema=False)
 @app.get("/quota", include_in_schema=False)
-async def get_user_quota(request: Request, device_id: Optional[str] = None):
+async def get_user_quota(request: Request, session: Dict[str, Any] = Depends(get_current_session)):
     """
-    Returns monthly character usage, limit, remaining characters, and tier (free/pro).
+    Returns sanitized monthly character usage and tier.
+    CRITICAL: Never exposes Stripe IDs, license codes, or internal notes.
     """
-    dev_id = (
-        device_id
-        or request.headers.get("x-device-id")
-        or request.headers.get("X-Device-Id")
-        or "dev_anonymous"
-    )
-    fingerprint = (
-        request.headers.get("x-device-fingerprint")
-        or request.headers.get("X-Device-Fingerprint")
-        or ""
-    )
-    client_ip = get_client_ip(request)
-    return billing_db.get_device_quota(dev_id, fingerprint=fingerprint, client_ip=client_ip)
-
+    device_id = session["device_id"]
+    return billing_db.get_device_quota(device_id)
 
 @app.post("/v1/user/redeem-license", summary="Redeem VIP Promo / License Code")
 @app.post("/user/redeem-license", include_in_schema=False)
 @app.post("/redeem-license", include_in_schema=False)
-async def redeem_license(req: RedeemLicenseRequest):
+@app.post("/v1/license/redeem", include_in_schema=False)
+@app.post("/license/redeem", include_in_schema=False)
+async def redeem_license(
+    req: RedeemLicenseRequest,
+    request: Request,
+    session: Dict[str, Any] = Depends(get_current_session),
+):
     """
-    Redeems a Promo / VIP License code and upgrades device to lifetime Pro.
+    Redeems a Promo / VIP License code for the authenticated session.
+    Protected against brute-force attacks with lockout after 5 failed attempts.
+    Returns 192-bit recovery key upon successful Pro activation.
     """
-    success, message, quota = billing_db.redeem_license_key(req.device_id, req.code)
+    device_id = session["device_id"]
+    client_ip = get_client_ip(request)
+
+    success, message, quota = billing_db.redeem_license_key(
+        device_id=device_id, code=req.code, client_ip=client_ip
+    )
     if not success:
+        if "lockout" in message.lower() or "too many" in message.lower():
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=message)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
+    # Generate high-entropy recovery key upon Pro upgrade
+    recovery_key = billing_db.generate_recovery_key(device_id)
+
     return {
         "success": True,
         "message": message,
         "quota": quota,
+        "recovery_key": recovery_key,
     }
-
-
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
-STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-
 
 @app.post("/v1/billing/create-checkout-session", summary="Generate Stripe Checkout Link")
 @app.post("/billing/create-checkout-session", include_in_schema=False)
-async def create_checkout_session(req: CreateCheckoutRequest, request: Request):
+async def create_checkout_session(
+    req: CreateCheckoutRequest,
+    request: Request,
+    session: Dict[str, Any] = Depends(get_current_session),
+):
     """
-    Creates a real Stripe Checkout Session for upgrading a device to Pro.
+    Creates Stripe Checkout Session strictly bound to authenticated session device ID.
+    Ignores any client-supplied device_id in request body.
     """
-    # Temporarily paused
-    UPGRADES_PAUSED = True
+    target_device = session["device_id"]
+
+    UPGRADES_PAUSED = False
     if UPGRADES_PAUSED:
         return {
             "checkout_url": None,
-            "message": "Pro upgrades are temporarily unavailable. Please check back soon!",
+            "message": "Pro upgrades are temporarily paused. Please check back soon!",
         }
 
     stripe_key = STRIPE_SECRET_KEY
     price_id = STRIPE_PRICE_ID
 
-    # Resolve public base URL (handling Cloudflare / reverse proxy headers)
     forwarded_proto = request.headers.get("x-forwarded-proto", "https")
     forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
-    if forwarded_host:
-        public_base_url = f"{forwarded_proto}://{forwarded_host}".rstrip("/")
-    else:
-        public_base_url = str(request.base_url).rstrip("/")
+    public_base_url = f"{forwarded_proto}://{forwarded_host}".rstrip("/") if forwarded_host else str(request.base_url).rstrip("/")
 
-    return_url = req.return_url or f"{public_base_url}/billing/success?device_id={req.device_id}&session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{public_base_url}/billing/cancel?device_id={req.device_id}"
+    return_url = req.return_url or f"{public_base_url}/billing/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{public_base_url}/billing/cancel"
 
     if stripe_key and price_id:
         try:
             import stripe
             stripe.api_key = stripe_key
 
-            # Determine subscription vs payment
             try:
                 price_obj = stripe.Price.retrieve(price_id)
                 mode = "subscription" if price_obj.type == "recurring" else "payment"
@@ -1030,299 +1238,196 @@ async def create_checkout_session(req: CreateCheckoutRequest, request: Request):
                 "mode": mode,
                 "success_url": return_url,
                 "cancel_url": cancel_url,
-                "client_reference_id": req.device_id,
-                "metadata": {"device_id": req.device_id},
+                "client_reference_id": target_device,
+                "metadata": {"device_id": target_device},
             }
 
             try:
-                session = stripe.checkout.Session.create(**checkout_kwargs, managed_payments={"enabled": False})
+                stripe_sess = stripe.checkout.Session.create(**checkout_kwargs, managed_payments={"enabled": False})
             except Exception:
-                session = stripe.checkout.Session.create(**checkout_kwargs)
+                stripe_sess = stripe.checkout.Session.create(**checkout_kwargs)
 
-            logger.info(f"Generated Stripe Checkout session {session.id} for device '{req.device_id}'")
-            return {"checkout_url": session.url}
+            logger.info(f"Generated Stripe Checkout session {stripe_sess.id} for authenticated device '{target_device}'")
+            return {"checkout_url": stripe_sess.url}
         except Exception as e:
-            logger.error(f"Stripe session creation error: {e}")
+            logger.error(f"Stripe session error: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
-    return {
-        "checkout_url": None,
-        "message": "Stripe billing is not configured yet.",
-    }
-
+    return {"checkout_url": None, "message": "Stripe billing is not configured yet."}
 
 @app.get("/billing/success", include_in_schema=False)
-async def billing_success(request: Request, device_id: Optional[str] = None, session_id: Optional[str] = None):
-    """
-    Handles return redirect after successful Stripe checkout.
-    Verifies session with Stripe, upgrades device to Pro in SQLite, and returns to Studio.
-    """
-    target_device = device_id or "dev_anonymous"
-
+async def billing_success(request: Request, session_id: Optional[str] = None):
+    """Handles return redirect after successful Stripe checkout."""
     if session_id and STRIPE_SECRET_KEY:
         try:
             import stripe
             stripe.api_key = STRIPE_SECRET_KEY
             checkout_sess = stripe.checkout.Session.retrieve(session_id)
-            if checkout_sess.client_reference_id:
-                target_device = checkout_sess.client_reference_id
-            elif checkout_sess.metadata and checkout_sess.metadata.get("device_id"):
-                target_device = checkout_sess.metadata.get("device_id")
+            target_device = checkout_sess.client_reference_id or (checkout_sess.metadata and checkout_sess.metadata.get("device_id"))
+            if target_device:
+                cust = checkout_sess.customer or ""
+                sub = checkout_sess.subscription or ""
+                expires_at = None
+                if sub and STRIPE_SECRET_KEY:
+                    try:
+                        sub_obj = stripe.Subscription.retrieve(sub)
+                        if hasattr(sub_obj, "current_period_end") and sub_obj.current_period_end:
+                            expires_at = datetime.datetime.fromtimestamp(
+                                sub_obj.current_period_end, datetime.timezone.utc
+                            ).isoformat()
+                    except Exception as sub_err:
+                        logger.warning(f"Failed to fetch current_period_end from Stripe sub {sub}: {sub_err}")
 
-            cust = checkout_sess.customer or ""
-            sub = checkout_sess.subscription or ""
-            
-            # Fetch Stripe subscription period end if available
-            expires_at = None
-            if sub and STRIPE_SECRET_KEY:
-                try:
-                    sub_obj = stripe.Subscription.retrieve(sub)
-                    if hasattr(sub_obj, "current_period_end") and sub_obj.current_period_end:
-                        expires_at = datetime.datetime.fromtimestamp(
-                            sub_obj.current_period_end, datetime.timezone.utc
-                        ).isoformat()
-                except Exception as sub_err:
-                    logger.warning(f"Failed to fetch current_period_end from Stripe sub {sub}: {sub_err}")
-
-            billing_db.grant_pro(
-                target_device,
-                tier="pro",
-                note=f"Stripe Paid: {session_id} (Customer: {cust}, Sub: {sub})",
-                stripe_customer_id=cust,
-                stripe_subscription_id=sub,
-                subscription_expires_at=expires_at,
-            )
-            logger.info(f"Upgraded device '{target_device}' to PRO via Stripe Checkout session {session_id} (Customer: {cust}, Sub: {sub}, Expires: {expires_at})")
+                billing_db.grant_pro(
+                    target_device,
+                    tier="pro",
+                    note=f"Stripe Paid: {session_id}",
+                    stripe_customer_id=cust,
+                    stripe_subscription_id=sub,
+                    subscription_expires_at=expires_at,
+                )
+                logger.info(f"Upgraded device '{target_device}' to PRO via Stripe Checkout session {session_id}")
         except Exception as e:
             logger.warning(f"Error retrieving Stripe session {session_id}: {e}")
-            billing_db.grant_pro(target_device, tier="pro", note="Stripe Checkout Redirect")
-    elif device_id:
-        billing_db.grant_pro(device_id, tier="pro", note="Stripe Checkout Redirect")
 
     return RedirectResponse(url="/?payment=success")
 
-
 @app.get("/billing/cancel", include_in_schema=False)
 async def billing_cancel():
-    """Handles cancel redirect from Stripe Checkout."""
     return RedirectResponse(url="/?payment=cancelled")
 
-
 @app.post("/v1/billing/toggle-auto-renew", summary="Toggle Subscription Auto-Renewal")
-async def toggle_auto_renew(req: ToggleAutoRenewRequest):
+async def toggle_auto_renew(
+    req: ToggleAutoRenewRequest,
+    session: Dict[str, Any] = Depends(get_current_session),
+):
     """
-    Turns auto-renewal on or off for a user's Pro subscription.
-    When turned off (cancel_at_period_end=True), user keeps Pro until current billing cycle ends.
+    Turns auto-renewal on or off strictly for the authenticated session device.
+    Ignores any client-supplied device ID in request body.
     """
-    dev = billing_db.get_device_raw(req.device_id)
+    target_device = session["device_id"]
+    dev = billing_db.get_device_raw(target_device)
     if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
 
     sub_id = dev.get("stripe_subscription_id")
-    cust_id = dev.get("stripe_customer_id")
-
-    # If sub_id is not yet in column, look for it in the device note
-    if not sub_id and dev.get("note"):
-        import re
-        s_match = re.search(r"Sub:\s*(sub_[a-zA-Z0-9]+)", dev["note"])
-        if s_match:
-            sub_id = s_match.group(1)
-        c_match = re.search(r"Customer:\s*(cus_[a-zA-Z0-9]+)", dev["note"])
-        if c_match:
-            cust_id = c_match.group(1)
-
-    # If still missing but cust_id present, query Stripe
-    if not sub_id and cust_id and STRIPE_SECRET_KEY:
-        try:
-            import stripe
-            stripe.api_key = STRIPE_SECRET_KEY
-            subs = stripe.Subscription.list(customer=cust_id, status="active", limit=1)
-            if subs and subs.data:
-                sub_id = subs.data[0].id
-                billing_db.grant_pro(req.device_id, tier=dev["tier"], stripe_subscription_id=sub_id, stripe_customer_id=cust_id)
-        except Exception as e:
-            logger.warning(f"Failed to lookup Stripe subscription for customer {cust_id}: {e}")
-
-    # Call Stripe API to update subscription renewal setting
     if sub_id and STRIPE_SECRET_KEY:
         try:
             import stripe
             stripe.api_key = STRIPE_SECRET_KEY
-            sub = stripe.Subscription.modify(sub_id, cancel_at_period_end=req.cancel_at_period_end)
-            logger.info(f"Stripe subscription {sub_id} cancel_at_period_end set to {sub.cancel_at_period_end}")
+            stripe.Subscription.modify(sub_id, cancel_at_period_end=req.cancel_at_period_end)
+            logger.info(f"Stripe sub {sub_id} cancel_at_period_end updated to {req.cancel_at_period_end}")
         except Exception as e:
-            logger.warning(f"Notice modifying Stripe subscription {sub_id}: {e}")
+            logger.error(f"Error updating Stripe renewal: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to update subscription: {str(e)}")
 
-    updated_quota = billing_db.update_subscription_renewal(req.device_id, req.cancel_at_period_end)
-    msg = (
-        "Auto-renewal turned off. You retain full Pro Unlimited access until the end of your 30-day billing cycle. No further payments will be charged."
-        if req.cancel_at_period_end
-        else "Auto-renewal turned back on. Your subscription will renew automatically each month."
-    )
+    updated_quota = billing_db.set_auto_renew(target_device, auto_renew=not req.cancel_at_period_end)
     return {
         "success": True,
-        "cancel_at_period_end": req.cancel_at_period_end,
-        "message": msg,
+        "auto_renew": not req.cancel_at_period_end,
+        "message": f"Auto-renewal {'enabled' if not req.cancel_at_period_end else 'disabled'}.",
         "quota": updated_quota,
     }
 
-
 @app.post("/v1/billing/cancel-subscription", summary="Cancel Pro Subscription")
-async def cancel_subscription(req: CancelSubscriptionRequest):
+async def cancel_subscription(
+    req: CancelSubscriptionRequest,
+    session: Dict[str, Any] = Depends(get_current_session),
+):
     """
-    Cancels the Pro subscription renewal. Pro features strictly persist for the full 30-day period.
+    Cancels Pro subscription renewal strictly for the authenticated session device.
+    Pro features persist until the end of the paid 30-day period.
     """
-    dev = billing_db.get_device_raw(req.device_id)
+    target_device = session["device_id"]
+    dev = billing_db.get_device_raw(target_device)
     if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
 
     sub_id = dev.get("stripe_subscription_id")
-    cust_id = dev.get("stripe_customer_id")
-
-    if not sub_id and dev.get("note"):
-        import re
-        s_match = re.search(r"Sub:\s*(sub_[a-zA-Z0-9]+)", dev["note"])
-        if s_match:
-            sub_id = s_match.group(1)
-        c_match = re.search(r"Customer:\s*(cus_[a-zA-Z0-9]+)", dev["note"])
-        if c_match:
-            cust_id = c_match.group(1)
-
-    if not sub_id and cust_id and STRIPE_SECRET_KEY:
-        try:
-            import stripe
-            stripe.api_key = STRIPE_SECRET_KEY
-            subs = stripe.Subscription.list(customer=cust_id, status="active", limit=1)
-            if subs and subs.data:
-                sub_id = subs.data[0].id
-        except Exception as e:
-            logger.warning(f"Failed to lookup Stripe subscription for customer {cust_id}: {e}")
-
     if sub_id and STRIPE_SECRET_KEY:
         try:
             import stripe
             stripe.api_key = STRIPE_SECRET_KEY
-            # Schedule cancellation at period end so Stripe doesn't wipe paid days
             stripe.Subscription.modify(sub_id, cancel_at_period_end=True)
-            logger.info(f"Scheduled Stripe subscription {sub_id} to cancel at period end")
+            logger.info(f"Scheduled Stripe subscription {sub_id} cancellation at period end")
         except Exception as e:
-            logger.error(f"Error modifying Stripe subscription {sub_id}: {e}")
+            logger.error(f"Error modifying Stripe sub {sub_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to cancel subscription with provider: {str(e)}")
 
-    # Update local DB to set cancel_at_period_end=1 while strictly preserving Pro status
     updated_quota = billing_db.cancel_subscription_immediate(
-        req.device_id, note="Subscription cancelled - retains Pro access until 30-day period ends"
+        target_device, note="Subscription cancelled - retains Pro access until 30-day period ends"
     )
-    msg = "Subscription cancelled. Auto-renewal is turned off. You retain full Pro Unlimited access until the end of your 30-day period. No further payments will be charged."
 
     return {
         "success": True,
         "immediate": False,
-        "message": msg,
+        "message": "Subscription cancelled. Auto-renewal turned off. Pro access retained until period ends.",
         "quota": updated_quota,
     }
 
-
 @app.post("/v1/billing/webhook", summary="Stripe Webhook Receiver")
 async def stripe_webhook(request: Request):
-    """
-    Handles Stripe webhooks (checkout.session.completed, invoice.payment_succeeded, customer.subscription.deleted).
-    Enforces cryptographic Stripe-Signature header verification to prevent forged events.
-    """
+    """Handles signed Stripe webhooks with cryptographic signature verification."""
+    webhook_secret = STRIPE_WEBHOOK_SECRET
     payload = await request.body()
-    sig_header = request.headers.get("stripe-signature") or request.headers.get("Stripe-Signature")
-    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET") or STRIPE_WEBHOOK_SECRET
+    sig_header = request.headers.get("stripe-signature")
 
-    if not webhook_secret:
-        logger.error("Stripe webhook received but STRIPE_WEBHOOK_SECRET is not configured on server")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Stripe Webhook verification not configured on server",
-        )
-
-    if not sig_header:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing stripe-signature header",
-        )
+    if not webhook_secret or not sig_header:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing webhook signature")
 
     try:
         import stripe
         event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
     except Exception as e:
-        logger.warning(f"Invalid Stripe webhook signature verification: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid webhook signature: {e}",
-        )
+        logger.warning(f"Stripe webhook signature error: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid signature: {e}")
 
-    try:
-        event_type = event.get("type")
+    event_type = event.get("type", "")
+    event_data = event.get("data", {}).get("object", {})
 
-        if event_type in ("checkout.session.completed", "invoice.payment_succeeded"):
-            data_object = event.get("data", {}).get("object", {})
-            device_id = (
-                data_object.get("client_reference_id")
-                or data_object.get("metadata", {}).get("device_id")
+    if event_type == "checkout.session.completed":
+        target_dev = event_data.get("client_reference_id") or event_data.get("metadata", {}).get("device_id")
+        cust_id = event_data.get("customer", "")
+        sub_id = event_data.get("subscription", "")
+        if target_dev:
+            billing_db.grant_pro(
+                target_dev,
+                tier="pro",
+                note=f"Stripe Checkout webhook ({event.get('id')})",
+                stripe_customer_id=cust_id,
+                stripe_subscription_id=sub_id,
             )
-            cust = data_object.get("customer") or ""
-            sub = data_object.get("subscription") or ""
-            if device_id:
-                billing_db.grant_pro(
-                    device_id,
-                    tier="pro",
-                    note=f"Webhook: {event_type}",
-                    stripe_customer_id=cust,
-                    stripe_subscription_id=sub,
-                )
-                logger.info(f"Webhook successfully upgraded device '{device_id}' to PRO!")
+            logger.info(f"Webhook checkout.session.completed: Upgraded '{target_dev}' to Pro")
 
-        elif event_type == "customer.subscription.deleted":
-            data_object = event.get("data", {}).get("object", {})
-            sub_id = data_object.get("id")
-            if sub_id:
-                billing_db.cancel_subscription_by_sub_id(sub_id, note="Subscription expired/deleted via webhook")
-                logger.info(f"Webhook marked subscription {sub_id} as deleted")
+    elif event_type == "customer.subscription.deleted":
+        sub_id = event_data.get("id")
+        if sub_id:
+            billing_db.cancel_subscription_by_sub_id(sub_id, note="Stripe subscription deleted")
+            logger.info(f"Webhook customer.subscription.deleted: Revoked Pro for sub {sub_id}")
 
-        elif event_type == "customer.subscription.updated":
-            data_object = event.get("data", {}).get("object", {})
-            sub_id = data_object.get("id")
-            cancel_at_period_end = data_object.get("cancel_at_period_end", False)
-            if sub_id:
-                billing_db.sync_subscription_status_by_sub_id(sub_id, cancel_at_period_end)
-                logger.info(f"Webhook synced cancel_at_period_end={cancel_at_period_end} for sub {sub_id}")
-
-        return {"status": "received"}
-    except Exception as e:
-        logger.error(f"Webhook processing error: {e}")
-        return {"status": "error", "detail": str(e)}
+    return {"status": "success"}
 
 
-@app.post("/admin/grant-pro", summary="Admin API: Directly Grant Pro to Device ID")
+# ============================================================================
+# Admin Endpoints (Hidden from OpenAPI Schema)
+# ============================================================================
+
+@app.post("/admin/grant-pro", summary="Admin API: Directly Grant Pro", include_in_schema=False)
 async def admin_grant_pro(req: GrantProRequest, request: Request):
-    """
-    Admin endpoint protected by X-Admin-Secret header to grant Pro to any device ID.
-    """
-    admin_secret = os.environ.get("ADMIN_SECRET_KEY")
+    """Admin endpoint protected by X-Admin-Secret header."""
+    admin_secret = ADMIN_SECRET_KEY
     client_secret = request.headers.get("X-Admin-Secret") or request.headers.get("x-admin-secret")
 
     if not admin_secret or client_secret != admin_secret:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Admin Secret Key")
 
     res = billing_db.grant_pro(req.device_id, tier=req.tier, note=req.note)
-    return {
-        "success": True,
-        "device_id": req.device_id,
-        "quota": res,
-    }
+    return {"success": True, "device_id": req.device_id, "quota": res}
 
-
-@app.post("/admin/create-license-key", summary="Admin API: Generate or Register Promo / License Code")
+@app.post("/admin/create-license-key", summary="Admin API: Generate License Code", include_in_schema=False)
 async def admin_create_license_key(req: CreateLicenseKeyRequest, request: Request):
-    """
-    Admin endpoint protected by X-Admin-Secret header to create custom VIP or promo license keys.
-    """
-    admin_secret = os.environ.get("ADMIN_SECRET_KEY")
+    """Admin endpoint protected by X-Admin-Secret header. Generates 128-bit license code."""
+    admin_secret = ADMIN_SECRET_KEY
     client_secret = request.headers.get("X-Admin-Secret") or request.headers.get("x-admin-secret")
 
     if not admin_secret or client_secret != admin_secret:
@@ -1334,60 +1439,308 @@ async def admin_create_license_key(req: CreateLicenseKeyRequest, request: Reques
         max_uses=req.max_uses,
         note=req.note,
     )
-    return {
-        "success": True,
-        "license_key": res,
-    }
+    return {"success": True, "license_key": res}
 
 
-@app.api_route("/audio/{filename}", methods=["GET", "HEAD"], summary="Stream or Download Rendered Audio File")
-async def get_audio_file(filename: str):
+# ============================================================================
+# Synchronous TTS Rendering Endpoint (Worker 1)
+# ============================================================================
+
+@app.post("/render", response_model=RenderResponse, summary="Synthesize Text to Mastered Audio")
+async def render_audio(
+    req: RenderRequest,
+    request: Request,
+    response: Response,
+    session: Dict[str, Any] = Depends(get_current_session),
+):
     """
-    Stream or download generated audio file from the output directory with CORS headers.
+    Synthesize input text into speech with selected voice, speed, language, and EQ preset.
+    Limits:
+    - Free tier: max 3,000 characters per request, 1 active concurrent render per session.
+    - Pro tier: max 6,000 characters for synchronous rendering (scripts up to 25k use /v1/tts/jobs).
+    Dispatches to Worker 1 interactive queue (bounded at 20 tasks).
+    Supports cooperative client disconnect cancellation.
     """
-    # Sanitize filename against path traversal
-    safe_filename = Path(filename).name
-    file_path = OUTPUT_DIR / safe_filename
+    device_id = session["device_id"]
+    is_pro = session.get("is_pro", False)
+    text_len = len(req.text or "")
 
-    if not file_path.exists() or not file_path.is_file():
+    # Layer 1 Input Limits
+    if not is_pro and text_len > MAX_FREE_CHARS_SYNC:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Audio file '{safe_filename}' not found on server",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Free tier limit is {MAX_FREE_CHARS_SYNC} characters per render. Upgrade to Pro for longer scripts.",
+        )
+    if is_pro and text_len > MAX_PRO_CHARS_SYNC:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Synchronous limit is {MAX_PRO_CHARS_SYNC} characters. Use /v1/tts/jobs for scripts up to {MAX_PRO_CHARS_ASYNC} characters.",
         )
 
-    media_type = "audio/mpeg" if safe_filename.endswith(".mp3") else "audio/wav"
+    # Layer 4 Concurrency Protection for Free Tier (1 active render per session)
+    if not is_pro:
+        if device_id in active_free_renders:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Free tier allows 1 active render at a time. Please wait for your current render to complete.",
+            )
+        active_free_renders.add(device_id)
+
+    try:
+        client_ip = get_client_ip(request)
+        allowed, quota_info, quota_msg = billing_db.check_and_consume_quota(
+            device_id=device_id,
+            char_count=text_len,
+            voice_id=req.voice_id,
+            client_ip=client_ip,
+        )
+
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "error": "quota_exceeded",
+                    "message": quota_msg,
+                    "quota": quota_info,
+                },
+            )
+
+        response.headers["X-User-Tier"] = quota_info.get("tier", "free")
+        response.headers["X-Quota-Usage"] = str(quota_info.get("monthly_usage", 0))
+        response.headers["X-Quota-Remaining"] = str(quota_info.get("remaining_chars", "unlimited"))
+
+        if req.voice_id not in VOICE_CATALOG:
+            req.voice_id = "af_bella"
+        if req.eq_preset not in MASTERING_PRESETS:
+            req.eq_preset = "Clean Studio (Default)"
+
+        render_payload = req.model_dump()
+        render_payload["device_id"] = device_id
+
+        # Timeout hierarchy: FastAPI request timeout is 240s
+        result = await engine_manager.render_sync_async(render_payload, timeout_sec=240.0)
+
+        filename = result["filename"]
+        base_name = result["base_name"]
+        file_ext = result.get("file_ext", "wav")
+        file_size = result.get("file_size_bytes", 0)
+
+        # Record authenticated ownership in audio_artifacts with 2-hour TTL
+        billing_db.record_audio_artifact(
+            file_id=base_name,
+            device_id=device_id,
+            filename=filename,
+            format=file_ext,
+            file_size=file_size,
+            ttl_seconds=DEFAULT_ARTIFACT_TTL,
+        )
+
+        base_url = str(request.base_url).rstrip("/")
+        audio_url = f"{base_url}/audio/{filename}"
+
+        return RenderResponse(
+            success=True,
+            audio_path=result["audio_path"],
+            audio_url=audio_url,
+            filename=filename,
+            duration=result["duration"],
+            sample_rate=result["sample_rate"],
+            file_size_bytes=file_size,
+            voice_id=result["voice_id"],
+            voice_name=result["voice_name"],
+            lang_resolved=result["lang_resolved"],
+            eq_preset=result["eq_preset"],
+            audio_base64=result.get("audio_base64"),
+            srt_content=result.get("srt_content"),
+            srt_filename=result.get("srt_filename"),
+        )
+    finally:
+        if not is_pro:
+            active_free_renders.discard(device_id)
+
+
+# ============================================================================
+# Asynchronous TTS Job API (Worker 2)
+# ============================================================================
+
+@app.post("/v1/tts/jobs", status_code=status.HTTP_202_ACCEPTED, summary="Submit Long-Form Pro Batch TTS Job")
+async def create_tts_job(
+    req: CreateTTSJobRequest,
+    request: Request,
+    session: Dict[str, Any] = Depends(get_current_session),
+):
+    """
+    Submits a long-form TTS job (up to 25,000 characters) to Worker 2.
+    Requires an active Pro subscription. Returns HTTP 202 with job_id.
+    """
+    device_id = session["device_id"]
+    is_pro = session.get("is_pro", False)
+    text_len = len(req.text or "")
+
+    if not is_pro:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Asynchronous batch jobs require an active Pro subscription.",
+        )
+
+    if text_len > MAX_PRO_CHARS_ASYNC:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Maximum script length for async jobs is {MAX_PRO_CHARS_ASYNC} characters.",
+        )
+
+    # Consume quota
+    client_ip = get_client_ip(request)
+    allowed, quota_info, quota_msg = billing_db.check_and_consume_quota(
+        device_id=device_id, char_count=text_len, voice_id=req.voice_id, client_ip=client_ip
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={"error": "quota_exceeded", "message": quota_msg, "quota": quota_info},
+        )
+
+    job_id = f"job_{secrets.token_urlsafe(16)}"
+    billing_db.create_tts_job(job_id=job_id, device_id=device_id, char_count=text_len)
+
+    payload = req.model_dump()
+    payload["job_id"] = job_id
+    payload["device_id"] = device_id
+    payload["is_job"] = True
+
+    engine_manager.submit_batch_job(payload)
+
+    return {
+        "job_id": job_id,
+        "status": "QUEUED",
+        "char_count": text_len,
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+
+@app.get("/v1/tts/jobs/{job_id}", summary="Get Status of Asynchronous TTS Job")
+async def get_tts_job(job_id: str, session: Dict[str, Any] = Depends(get_current_session)):
+    """Returns status and audio URL for a job. Enforces session ownership."""
+    device_id = session["device_id"]
+    job = billing_db.get_tts_job(job_id)
+    if not job or job["device_id"] != device_id:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "progress": job.get("progress", 0.0),
+        "filename": job.get("filename"),
+        "audio_url": job.get("audio_url"),
+        "char_count": job.get("char_count"),
+        "created_at": job["created_at"],
+        "updated_at": job.get("updated_at"),
+        "error_message": job.get("error_message"),
+    }
+
+@app.get("/v1/tts/jobs/{job_id}/audio", summary="Download Finished Audio for TTS Job")
+async def get_tts_job_audio(job_id: str, session: Dict[str, Any] = Depends(get_current_session)):
+    """Delivers completed audio file for a job. Enforces session ownership."""
+    device_id = session["device_id"]
+    job = billing_db.get_tts_job(job_id)
+    if not job or job["device_id"] != device_id:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job["status"] != "COMPLETED" or not job.get("filename"):
+        raise HTTPException(status_code=400, detail=f"Job is not completed (status={job['status']})")
+
+    filename = job["filename"]
+    safe_fn = Path(filename).name
+    file_path = OUTPUT_DIR / safe_fn
+
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Job audio file not found on disk")
+
+    media_type = "audio/mpeg" if safe_fn.endswith(".mp3") else "audio/wav"
+    return FileResponse(
+        path=file_path,
+        media_type=media_type,
+        headers={"Cache-Control": "private, no-cache", "Content-Disposition": f'inline; filename="{safe_fn}"'},
+    )
+
+@app.post("/v1/tts/jobs/{job_id}/cancel", summary="Cancel Running or Queued TTS Job")
+async def cancel_tts_job(job_id: str, session: Dict[str, Any] = Depends(get_current_session)):
+    """Cancels an active or queued job. Enforces session ownership."""
+    device_id = session["device_id"]
+    job = billing_db.get_tts_job(job_id)
+    if not job or job["device_id"] != device_id:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job["status"] in ("COMPLETED", "FAILED", "CANCELLED"):
+        return {"success": False, "message": f"Job already in terminal state ({job['status']})"}
+
+    engine_manager.cancellation_dict[job_id] = True
+    billing_db.update_tts_job(job_id, status="CANCELLED", error_message="Cancelled by user")
+    return {"success": True, "message": "Job cancelled successfully."}
+
+
+# ============================================================================
+# Authenticated & Hardened Audio Delivery Endpoint
+# ============================================================================
+
+@app.api_route("/audio/{filename}", methods=["GET", "HEAD"], summary="Download Rendered Audio or SRT Subtitles")
+async def get_audio_file(
+    filename: str,
+    request: Request,
+    session: Optional[Dict[str, Any]] = Depends(get_optional_session),
+):
+    """
+    Delivers audio or subtitle files with authenticated ownership and 2-hour TTL verification.
+    Rejects path traversal attempts. Requires caller to own the artifact.
+    """
+    # 1. Path Traversal Defense
+    safe_filename = Path(filename).name
+    if ".." in filename or "/" in filename or "\\" in filename or safe_filename != filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid filename format")
+
+    device_id = session["device_id"] if session else None
+    if not device_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required to access audio artifact")
+    status_code, artifact = billing_db.get_audio_artifact(safe_filename, device_id=device_id)
+
+    if status_code == "NOT_FOUND":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio file not found or expired")
+    if status_code == "EXPIRED":
+        file_path = OUTPUT_DIR / safe_filename
+        if file_path.exists():
+            file_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio file has expired (2-hour TTL)")
+    if status_code == "UNAUTHORIZED":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to audio artifact")
+
+    file_path = OUTPUT_DIR / safe_filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio file not found on disk")
+
+    if safe_filename.endswith(".mp3"):
+        media_type = "audio/mpeg"
+    elif safe_filename.endswith(".srt"):
+        media_type = "text/plain; charset=utf-8"
+    else:
+        media_type = "audio/wav"
 
     return FileResponse(
         path=file_path,
         media_type=media_type,
         content_disposition_type="inline",
         headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
             "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=3600",
+            "Cache-Control": "private, no-cache",
             "Content-Disposition": f'inline; filename="{safe_filename}"',
         },
     )
 
-
-@app.get("/voices", summary="List All 60 Available Voices")
+@app.get("/voices", summary="List All Available Voices")
 async def list_voices():
-    """Returns the full dictionary catalog of all 60 supported international voices."""
-    return {
-        "count": len(VOICE_CATALOG),
-        "voices": VOICE_CATALOG,
-    }
-
+    return {"count": len(VOICE_CATALOG), "voices": VOICE_CATALOG}
 
 @app.get("/presets", summary="List Mastering EQ Presets")
 async def list_presets():
-    """Returns all acoustic EQ and compression mastering presets."""
-    return {
-        "count": len(MASTERING_PRESETS),
-        "presets": MASTERING_PRESETS,
-    }
+    return {"count": len(MASTERING_PRESETS), "presets": MASTERING_PRESETS}
 
 
 # ============================================================================
@@ -1395,7 +1748,7 @@ async def list_presets():
 # ============================================================================
 
 def extract_api_key(request: Request) -> Optional[str]:
-    """Extracts API key from Authorization header ('Bearer sk_...') or 'X-API-Key'."""
+    """Extracts secret key from Authorization Bearer or X-API-Key header."""
     auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
     if auth_header and auth_header.lower().startswith("bearer "):
         return auth_header[7:].strip()
@@ -1404,154 +1757,76 @@ def extract_api_key(request: Request) -> Optional[str]:
         return api_key_header.strip()
     return None
 
-
-# ============================================================================
-# Anti-DDoS Rate Limiting & Cooldown Engine
-# ============================================================================
-
-FREE_TIER_API_DELAY_SECONDS = 5.0  # Enforced spacing between consecutive calls for free tier
+FREE_TIER_API_DELAY_SECONDS = 5.0
 
 class AntiDDoSRateLimiter:
-    """
-    In-memory concurrency and pacing rate-limiter for free-tier API calls.
-    Prevents DDoS, bot flooding, and model worker thread exhaustion.
-    """
+    """In-memory rate limiter enforcing delay between consecutive API calls for free tier."""
 
     def __init__(self, free_delay_seconds: float = FREE_TIER_API_DELAY_SECONDS):
-        self.free_delay_seconds = free_delay_seconds
-        self._active_requests: set[str] = set()
-        self._last_call_timestamps: dict[str, float] = {}
+        self.free_delay = free_delay_seconds
+        self._last_call_timestamps: Dict[str, float] = {}
+        self._active_connections: Dict[str, int] = {}
         self._lock = asyncio.Lock()
 
     async def check_and_acquire(self, identifier: str, is_pro: bool = False) -> float:
-        """
-        Enforces:
-          1. Concurrency limit: Maximum 1 active request at a time for Free tier callers.
-             Immediate HTTP 429 if another request is in-flight.
-          2. Minimum interval delay: Calculates wait time so that consecutive requests
-             have at least `self.free_delay_seconds` spacing.
-        Returns the delay (in seconds) to await before synthesis.
-        """
-        if is_pro:
-            return 0.0
-
         async with self._lock:
-            # Clean up old timestamps periodically
-            if len(self._last_call_timestamps) > 5000:
-                cutoff = time.time() - 3600.0
-                self._last_call_timestamps = {
-                    k: v for k, v in self._last_call_timestamps.items() if v > cutoff
-                }
-
-            # 1. Concurrency check: Reject parallel requests immediately with 429
-            if identifier in self._active_requests:
+            active = self._active_connections.get(identifier, 0)
+            if not is_pro and active >= 1:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail={
                         "error": {
-                            "message": (
-                                "Too many concurrent requests. Free tier is strictly limited to 1 active request at a time. "
-                                "Please wait for your active request to complete or upgrade to Pro for high-concurrency access."
-                            ),
-                            "type": "rate_limit_error",
-                            "param": None,
-                            "code": "concurrent_request_limit",
+                            "message": "Free tier API is restricted to 1 concurrent request. Upgrade to Pro for unlimited concurrency.",
+                            "type": "concurrency_limit_exceeded",
+                            "code": "free_tier_concurrency_limit",
                         }
                     },
-                    headers={"Retry-After": str(int(self.free_delay_seconds))},
                 )
+            self._active_connections[identifier] = active + 1
 
-            # 2. Pacing delay: Ensure minimum delay between 2 API calls
-            now = time.time()
+            if is_pro:
+                return 0.0
+
             last_time = self._last_call_timestamps.get(identifier, 0.0)
-            elapsed = now - last_time
-            required_wait = max(0.0, self.free_delay_seconds - elapsed)
+            elapsed = time.time() - last_time
+            if elapsed < self.free_delay:
+                return self.free_delay - elapsed
+            return 0.0
 
-            # Mark identifier as active so incoming concurrent requests get 429
-            self._active_requests.add(identifier)
-            return required_wait
-
-    async def release(self, identifier: str, is_pro: bool = False) -> None:
-        """Removes the active lock and updates the completion timestamp."""
-        if is_pro:
-            return
+    async def release(self, identifier: str, is_pro: bool = False):
         async with self._lock:
-            self._active_requests.discard(identifier)
+            curr = self._active_connections.get(identifier, 1)
+            self._active_connections[identifier] = max(0, curr - 1)
             self._last_call_timestamps[identifier] = time.time()
-
 
 api_rate_limiter = AntiDDoSRateLimiter(free_delay_seconds=FREE_TIER_API_DELAY_SECONDS)
 
-
 @app.get("/v1/models", summary="OpenAI-Compatible Model List")
 async def openai_list_models():
-    """
-    Returns an OpenAI-compatible list of models so tools/SDKs expecting OpenAI
-    can query models without errors.
-    """
     return {
         "object": "list",
         "data": [
-            {
-                "id": "kokoro",
-                "object": "model",
-                "created": 1700000000,
-                "owned_by": "kokoro-studio",
-                "permission": [],
-                "root": "kokoro",
-                "parent": None,
-            },
-            {
-                "id": "kokoro-82m",
-                "object": "model",
-                "created": 1700000000,
-                "owned_by": "kokoro-studio",
-                "permission": [],
-                "root": "kokoro-82m",
-                "parent": None,
-            },
-            {
-                "id": "tts-1",
-                "object": "model",
-                "created": 1700000000,
-                "owned_by": "kokoro-studio",
-                "permission": [],
-                "root": "tts-1",
-                "parent": None,
-            },
-            {
-                "id": "tts-1-hd",
-                "object": "model",
-                "created": 1700000000,
-                "owned_by": "kokoro-studio",
-                "permission": [],
-                "root": "tts-1-hd",
-                "parent": None,
-            },
+            {"id": "kokoro", "object": "model", "created": 1700000000, "owned_by": "kokoro-studio"},
+            {"id": "kokoro-82m", "object": "model", "created": 1700000000, "owned_by": "kokoro-studio"},
+            {"id": "tts-1", "object": "model", "created": 1700000000, "owned_by": "kokoro-studio"},
+            {"id": "tts-1-hd", "object": "model", "created": 1700000000, "owned_by": "kokoro-studio"},
         ],
     }
-
 
 @app.post("/v1/audio/speech", summary="OpenAI-Compatible Text-to-Speech Endpoint")
 async def openai_audio_speech(req: OpenAISpeechRequest, request: Request):
     """
     Drop-in OpenAI-compatible speech synthesis endpoint.
-    Accepts standard OpenAI TTS parameters (`model`, `input`, `voice`, `response_format`, `speed`)
-    and returns raw binary audio (audio/mpeg or audio/wav).
-    
-    Protected by Bearer token authentication (`sk_live_kokoro_...`), character quota tracking,
-    and anti-DDoS pacing/concurrency limits for free-tier users.
+    Protected by SHA-256 hashed API key authentication at rest.
     """
-    # 1. Authenticate API Key
     api_key = extract_api_key(request)
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
                 "error": {
-                    "message": "Missing API key. Pass your secret key in the Authorization header: 'Bearer sk_live_kokoro_...'",
+                    "message": "Missing API key. Pass secret key in Authorization header: 'Bearer sk_live_kokoro_...'",
                     "type": "invalid_request_error",
-                    "param": None,
                     "code": "missing_api_key",
                 }
             },
@@ -1561,45 +1836,27 @@ async def openai_audio_speech(req: OpenAISpeechRequest, request: Request):
     if text_len == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": {
-                    "message": "'input' text must not be empty.",
-                    "type": "invalid_request_error",
-                    "param": "input",
-                    "code": "empty_input",
-                }
-            },
+            detail={"error": {"message": "'input' text must not be empty.", "code": "empty_input"}},
         )
 
-    # Validate API key authenticity and tier
     is_valid, key_data, auth_err = billing_db.authenticate_api_key(api_key)
     if not is_valid or not key_data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": {
-                    "message": auth_err or "Invalid or revoked API key.",
-                    "type": "invalid_request_error",
-                    "param": None,
-                    "code": "invalid_api_key",
-                }
-            },
+            detail={"error": {"message": auth_err or "Invalid or revoked API key.", "code": "invalid_api_key"}},
         )
 
     key_id = key_data["key_id"]
     tier = key_data.get("tier", "free")
     is_pro = (tier == "pro")
 
-    # Enforce anti-DDoS concurrency limit & 5-second pacing delay for Free Tier
     wait_seconds = await api_rate_limiter.check_and_acquire(key_id, is_pro=is_pro)
 
     try:
         if wait_seconds > 0:
-            logger.info(f"Enforcing anti-DDoS delay of {wait_seconds:.2f}s for free API key {key_id}")
             await asyncio.sleep(wait_seconds)
 
         client_ip = get_client_ip(request)
-
         allowed, quota_info, quota_msg = billing_db.check_and_consume_api_key_quota(
             api_key=api_key,
             char_count=text_len,
@@ -1610,18 +1867,9 @@ async def openai_audio_speech(req: OpenAISpeechRequest, request: Request):
         if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={
-                    "error": {
-                        "message": quota_msg,
-                        "type": "insufficient_quota",
-                        "param": None,
-                        "code": "quota_exceeded",
-                        "quota": quota_info,
-                    }
-                },
+                detail={"error": {"message": quota_msg, "type": "insufficient_quota", "code": "quota_exceeded"}},
             )
 
-        # 2. Voice mapping & normalization
         target_voice = req.voice
         openai_voice_map = {
             "alloy": "am_adam",
@@ -1636,11 +1884,9 @@ async def openai_audio_speech(req: OpenAISpeechRequest, request: Request):
         elif target_voice not in VOICE_CATALOG:
             target_voice = "af_bella"
 
-        # 3. Format mapping
         fmt = req.response_format.lower().strip()
         output_format = "mp3" if fmt in ("mp3", "aac", "opus", "flac") else "wav"
 
-        # 4. Synthesize via async worker
         render_payload = {
             "text": req.input,
             "voice_id": target_voice,
@@ -1650,17 +1896,26 @@ async def openai_audio_speech(req: OpenAISpeechRequest, request: Request):
             "output_format": output_format,
             "pause_punctuation_ms": req.pause_punctuation_ms or 150,
             "pause_paragraph_ms": req.pause_paragraph_ms or 400,
+            "device_id": key_data["device_id"],
         }
 
-        dynamic_timeout = max(600.0, float(text_len * 4.0))
-        result = await engine_manager.render_async(render_payload, timeout_sec=dynamic_timeout)
+        result = await engine_manager.render_sync_async(render_payload, timeout_sec=240.0)
 
         file_path = Path(result["audio_path"])
         if not file_path.exists():
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Generated audio file not found")
+            raise HTTPException(status_code=500, detail="Generated audio file not found")
+
+        # Record artifact
+        billing_db.record_audio_artifact(
+            file_id=result["base_name"],
+            device_id=key_data["device_id"],
+            filename=result["filename"],
+            format=output_format,
+            file_size=result.get("file_size_bytes", 0),
+            ttl_seconds=DEFAULT_ARTIFACT_TTL,
+        )
 
         media_type = "audio/mpeg" if output_format == "mp3" else "audio/wav"
-
         return FileResponse(
             path=str(file_path),
             media_type=media_type,
@@ -1673,75 +1928,68 @@ async def openai_audio_speech(req: OpenAISpeechRequest, request: Request):
                 "X-Quota-Remaining": str(quota_info.get("remaining_chars", "unlimited")),
                 "X-RateLimit-Delay-Seconds": "0" if is_pro else str(int(FREE_TIER_API_DELAY_SECONDS)),
                 "X-RateLimit-Tier": tier,
-                "Access-Control-Allow-Origin": "*",
             },
         )
     finally:
         await api_rate_limiter.release(key_id, is_pro=is_pro)
 
-
 @app.get("/v1/audio/voices", summary="OpenAI-Compatible Voice Catalog")
-async def openai_audio_voices():
-    """Returns all 60 supported Kokoro voices formatted for developers."""
-    voices = []
-    for vid, vdata in VOICE_CATALOG.items():
-        voices.append({
-            "voice_id": vid,
-            "name": vdata.get("name", vid),
-            "gender": vdata.get("gender", "neutral"),
-            "language": vdata.get("lang_name", "English"),
-            "language_code": vdata.get("lang", "en-us"),
-            "flag": vdata.get("flag", "🌐"),
-            "description": vdata.get("description", ""),
-        })
-    return {"object": "list", "voices": voices}
+async def openai_list_voices():
+    return {"voices": [{"id": k, "name": v.get("name", k), "language": v.get("lang", "en-us")} for k, v in VOICE_CATALOG.items()]}
 
 
-@app.post("/v1/developer/keys", summary="Generate New API Key for Device")
-async def create_developer_key(req: CreateApiKeyRequest, request: Request):
-    """Generates a secure API key bound to the device's monthly quota."""
-    dev_id = req.device_id or request.headers.get("x-device-id") or "dev_anonymous"
+# ============================================================================
+# Developer API Key Management (Server Session Bound)
+# ============================================================================
+
+@app.post("/v1/developer/keys", summary="Generate New API Key for Authenticated Session")
+async def create_developer_key(
+    req: CreateApiKeyRequest,
+    session: Dict[str, Any] = Depends(get_current_session),
+):
+    """
+    Generates a secure API key bound to the authenticated session device.
+    CRITICAL: The full plaintext secret is returned ONCE upon creation.
+    Stored strictly as SHA-256 hash at rest.
+    """
+    device_id = session["device_id"]
     try:
-        return billing_db.create_api_key(device_id=dev_id, name=req.name)
+        return billing_db.create_api_key(device_id=device_id, name=req.name)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "error": {
-                    "message": str(e),
-                    "type": "permission_error",
-                    "code": "api_key_limit_reached",
-                }
-            },
+            detail={"error": {"message": str(e), "code": "api_key_limit_reached"}},
         )
 
-
-@app.get("/v1/developer/keys", summary="List Developer API Keys for Device")
-async def list_developer_keys(request: Request, device_id: Optional[str] = None):
-    """Lists all active API keys and current quota status for a device."""
-    dev_id = device_id or request.headers.get("x-device-id") or "dev_anonymous"
-    keys = billing_db.list_api_keys(device_id=dev_id)
-    quota = billing_db.get_device_quota(device_id=dev_id)
+@app.get("/v1/developer/keys", summary="List Developer API Keys for Authenticated Session")
+async def list_developer_keys(session: Dict[str, Any] = Depends(get_current_session)):
+    """
+    Lists active API keys for the authenticated session.
+    CRITICAL FIX: Returns masked keys only (e.g. sk_live_...1234).
+    Never contains plaintext keys or raw hashes.
+    """
+    device_id = session["device_id"]
+    keys = billing_db.list_api_keys(device_id=device_id)
+    quota = billing_db.get_device_quota(device_id=device_id)
     is_pro = quota.get("tier") == "pro"
     max_keys = 50 if is_pro else 1
+
     return {
-        "device_id": dev_id,
+        "device_id": device_id,
         "quota": quota,
         "keys": keys,
         "max_keys": max_keys,
         "can_create_key": is_pro or len(keys) < 1,
     }
 
-
 @app.delete("/v1/developer/keys/{key_id}", summary="Revoke Developer API Key")
-async def revoke_developer_key(key_id: str, request: Request, device_id: Optional[str] = None):
-    """Revokes an API key so it can no longer be used."""
-    dev_id = device_id or request.headers.get("x-device-id") or "dev_anonymous"
-    success = billing_db.revoke_api_key(device_id=dev_id, key_id=key_id)
+async def revoke_developer_key(key_id: str, session: Dict[str, Any] = Depends(get_current_session)):
+    """Revokes an API key. Enforces session ownership."""
+    device_id = session["device_id"]
+    success = billing_db.revoke_api_key(device_id=device_id, key_id=key_id)
     if not success:
         raise HTTPException(status_code=404, detail="API key not found or already revoked")
     return {"success": True, "message": "API key revoked successfully"}
-
 
 
 # ============================================================================
@@ -1763,18 +2011,18 @@ if FRONTEND_DIST.exists():
 # ============================================================================
 
 if __name__ == "__main__":
-    # Required for Windows multiprocessing support and PyInstaller compilation
     mp.freeze_support()
 
     port = int(os.environ.get("PORT", 8000))
     host = os.environ.get("HOST", "0.0.0.0")
 
     print("\n" + "=" * 62)
-    print("   [*] Kokoro Voice Studio Pro - FastAPI Backend Server")
+    print("   [*] Kokoro Voice Studio Pro - Hardened Backend Server")
     print(f"   [*] Server URL: http://127.0.0.1:{port} (LAN: http://0.0.0.0:{port})")
     print(f"   [*] Interactive Swagger Docs: http://127.0.0.1:{port}/docs")
-    print("   [*] Async Process Isolation: ENABLED")
-    print("   [*] CORS Allowed Origins: ['*']")
+    print("   [*] Dual Worker Architecture: ENABLED (Sync: 20, Batch: 50)")
+    print("   [*] Anonymous Session Authorization: ENABLED")
+    print("   [*] Masked Key & Hashed Rest Storage: ENABLED")
     print("=" * 62 + "\n")
 
     uvicorn.run(app, host=host, port=port, log_level="info")
