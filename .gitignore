@@ -51,6 +51,8 @@ vps_smoke_test.py
 tests/
 test_*.py
 *_test.py
+*AUDIT*.txt
+scratch*.txt
 
 # Local Admin & Promo Tools (kept on local storage only)
 add_promo.py
