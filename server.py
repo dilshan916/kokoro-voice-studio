@@ -90,7 +90,7 @@ from core.billing_db import billing_db
 # ============================================================================
 
 class RenderRequest(BaseModel):
-    text: str = Field(..., description="Input text to synthesize", min_length=1)
+    text: str = Field(..., description="Input text to synthesize", min_length=1, max_length=100000)
     voice_id: str = Field(default="af_bella", description="Voice ID from catalog (e.g. af_bella, jf_alpha, ff_camille)")
     speed: float = Field(default=1.0, ge=0.5, le=2.0, description="Speech speed multiplier (0.5 to 2.0)")
     eq_preset: str = Field(default="Clean Studio (Default)", description="Acoustic mastering EQ preset name")
@@ -136,7 +136,7 @@ class CancelSubscriptionRequest(BaseModel):
 
 class OpenAISpeechRequest(BaseModel):
     model: str = Field(default="kokoro", description="Model name (e.g. 'kokoro', 'kokoro-82m', 'tts-1', 'tts-1-hd')")
-    input: str = Field(..., description="The text to generate audio for", min_length=1)
+    input: str = Field(..., description="The text to generate audio for", min_length=1, max_length=100000)
     voice: str = Field(default="af_bella", description="Voice ID from catalog (e.g. af_bella, am_adam, jf_alpha)")
     response_format: str = Field(default="mp3", description="Audio format: mp3, wav, flac, aac, opus")
     speed: float = Field(default=1.0, ge=0.25, le=4.0, description="Speech speed multiplier (0.25 to 4.0)")
@@ -699,6 +699,16 @@ app.add_middleware(
 )
 
 
+def get_client_ip(request: Request) -> str:
+    """Extract authenticated client IP prioritizing trusted Nginx X-Real-IP header."""
+    return (
+        request.headers.get("x-real-ip")
+        or request.headers.get("X-Real-IP")
+        or (request.headers.get("x-forwarded-for", "").split(",")[0].strip() if request.headers.get("x-forwarded-for") else "")
+        or (request.client.host if request.client else "")
+    )
+
+
 # ============================================================================
 # REST API Endpoints & Static SPA Delivery
 # ============================================================================
@@ -864,10 +874,7 @@ async def render_audio(req: RenderRequest, request: Request, response: Response)
         or request.headers.get("X-Device-Fingerprint")
         or ""
     )
-    client_ip = (
-        request.headers.get("x-forwarded-for")
-        or (request.client.host if request.client else "")
-    )
+    client_ip = get_client_ip(request)
     text_len = len(req.text or "")
 
     allowed, quota_info, quota_msg = billing_db.check_and_consume_quota(
@@ -952,10 +959,7 @@ async def get_user_quota(request: Request, device_id: Optional[str] = None):
         or request.headers.get("X-Device-Fingerprint")
         or ""
     )
-    client_ip = (
-        request.headers.get("x-forwarded-for")
-        or (request.client.host if request.client else "")
-    )
+    client_ip = get_client_ip(request)
     return billing_db.get_device_quota(dev_id, fingerprint=fingerprint, client_ip=client_ip)
 
 
@@ -1594,7 +1598,7 @@ async def openai_audio_speech(req: OpenAISpeechRequest, request: Request):
             logger.info(f"Enforcing anti-DDoS delay of {wait_seconds:.2f}s for free API key {key_id}")
             await asyncio.sleep(wait_seconds)
 
-        client_ip = request.headers.get("x-forwarded-for") or (request.client.host if request.client else "")
+        client_ip = get_client_ip(request)
 
         allowed, quota_info, quota_msg = billing_db.check_and_consume_api_key_quota(
             api_key=api_key,
