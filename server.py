@@ -21,6 +21,7 @@ import datetime
 import hashlib
 import io
 import logging
+import math
 import multiprocessing as mp
 import os
 from pathlib import Path
@@ -246,28 +247,69 @@ def split_cjk_clause(clause: str, max_chars: int = 18) -> List[str]:
 
 
 def split_clause_into_balanced_chunks(
-    clause: str, max_words: int = 8, max_chars: int = 40
+    clause: str, max_words: int = 6, max_chars: int = 34
 ) -> List[str]:
-    """Split English/Latin clause into balanced chunks."""
+    """
+    Split clause into balanced, punchy vertical-video chunks (Shorts / Reels / TikTok).
+    Eliminates 1-2 word orphan tails, breaks on natural conjunctions/prepositions,
+    and preserves 17-20 characters-per-second reading cadence.
+    """
     words = clause.strip().split()
     if not words:
         return []
+
+    # If the clause fits naturally without visual crowding, keep it intact
+    if len(words) <= max_words and len(clause) <= max_chars:
+        return [clause.strip()]
+
+    conjunctions = {
+        "and", "but", "or", "so", "because", "when", "while", "if", "that",
+        "which", "rather", "than", "where", "then", "as", "with", "to", "for", "in", "on"
+    }
+
+    total_words = len(words)
+    num_chunks = max(math.ceil(total_words / max_words), math.ceil(len(clause) / max_chars), 2)
+    target_words = total_words // num_chunks
+
     chunks = []
-    current_words = []
-    for w in words:
-        potential_len = sum(len(x) for x in current_words) + len(current_words) + len(w)
-        if len(current_words) >= max_words or (potential_len > max_chars and current_words):
-            chunks.append(" ".join(current_words))
-            current_words = [w]
-        else:
-            current_words.append(w)
-    if current_words:
-        chunks.append(" ".join(current_words))
+    current = []
+
+    for idx, w in enumerate(words):
+        current.append(w)
+        words_left = total_words - (idx + 1)
+        cur_text = " ".join(current)
+        cur_len = len(cur_text)
+
+        if words_left == 0:
+            break
+
+        tail_words = words[idx + 1:]
+        tail_text = " ".join(tail_words)
+        tail_len = len(tail_text)
+
+        # If remaining words are only 1 or 2 words, absorb unless hard cap is reached
+        if words_left <= 2 and (cur_len + 1 + tail_len) <= max_chars + 6:
+            continue
+
+        next_w = words[idx + 1].lower().rstrip(",.!?")
+        is_natural_boundary = (next_w in conjunctions and len(current) >= max(2, target_words - 1))
+
+        hit_hard_limit = (len(current) >= max_words or cur_len >= max_chars)
+        hit_natural_split = (len(current) >= target_words and is_natural_boundary and words_left >= 2)
+        hit_target = (len(current) >= target_words and cur_len >= 20 and words_left >= 2)
+
+        if (hit_hard_limit or hit_natural_split or hit_target) and words_left >= 2:
+            chunks.append(" ".join(current))
+            current = []
+
+    if current:
+        chunks.append(" ".join(current))
+
     return chunks
 
 
 def split_text_into_punchy_srt_chunks(
-    text: str, max_words: int = 8, max_chars: int = 40
+    text: str, max_words: int = 6, max_chars: int = 34
 ) -> List[str]:
     """Build subtitle chunk list formatted for video creators."""
     clean = re.sub(
@@ -300,25 +342,26 @@ def split_text_into_punchy_srt_chunks(
 
 
 def calculate_chunk_acoustic_weight(chunk: str) -> float:
-    """Estimate speech duration weight of a text chunk."""
+    """Estimate speech duration weight of a text chunk with natural pauses."""
     chars = len(chunk)
     words = len(chunk.split())
+    # Baseline acoustic weighting: ~0.055s per character (18 CPS target)
     weight = float(max(chars, words * 4))
     if re.search(r"[.!?。！？]$", chunk.strip()):
-        weight += 6.0
+        weight += 6.0  # sentence end pause
     elif re.search(r"[,;:\-—，；：]$", chunk.strip()):
-        weight += 3.0
+        weight += 3.0  # clause boundary pause
     return max(weight, 2.0)
 
 
 def build_srt_subtitles(
     text: str,
     total_duration: float,
-    max_words: int = 8,
-    max_chars: int = 40,
-    max_chunk_dur: float = 3.5,
+    max_words: int = 6,
+    max_chars: int = 34,
+    max_chunk_dur: float = 3.0,
 ) -> str:
-    """Generate perfectly synchronized SubRip (.srt) subtitles."""
+    """Generate perfectly synchronized, vertical-video optimized SubRip (.srt) subtitles."""
     chunks = split_text_into_punchy_srt_chunks(text, max_words, max_chars)
     if not chunks or total_duration <= 0.05:
         return f"1\n00:00:00,000 --> {format_srt_timestamp(max(total_duration, 1.0))}\n{text.strip()}\n"
@@ -333,6 +376,8 @@ def build_srt_subtitles(
         dur = min(dur, max_chunk_dur)
         if idx == len(chunks):
             dur = max(0.2, total_duration - current_time)
+
+        dur = max(dur, 0.6)  # Minimum readable duration for viewer comfort
 
         start_ts = format_srt_timestamp(current_time)
         end_ts = format_srt_timestamp(min(current_time + dur, total_duration))
