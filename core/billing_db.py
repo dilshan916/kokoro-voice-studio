@@ -169,29 +169,6 @@ class BillingDB:
 
             conn.commit()
 
-            # Seed default VIP codes if license_keys table is empty
-            cursor.execute("SELECT COUNT(*) FROM license_keys")
-            count = cursor.fetchone()[0]
-            if count == 0:
-                now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                default_keys = [
-                    ("KOKORO-VIP-LIFETIME", "pro", -1, "Unlimited Lifetime VIP Master Pass", now),
-                    ("STUDIO-PRO-UNLIMITED", "pro", -1, "Unlimited Lifetime Studio Pro Pass", now),
-                    ("INFINITY-VOICE-PASS", "pro", -1, "Unlimited Lifetime Infinity Pass", now),
-                    ("KOKORO-FOUNDER-ACCESS", "pro", -1, "Unlimited Lifetime Founder Pass", now),
-                    ("VIP-CREATOR-LIFETIME", "pro", -1, "Unlimited Lifetime Creator Pass", now),
-                    ("NEURAL-PRO-FOREVER", "pro", -1, "Unlimited Lifetime Neural Pro Pass", now),
-                    ("KOKORO-MASTER-2026", "pro", -1, "Unlimited Lifetime Master Pass 2026", now),
-                    ("ULTRA-VOICE-ACCESS", "pro", -1, "Unlimited Lifetime Ultra Voice Pass", now),
-                    ("VIP-SPECIAL-GIFT", "pro", -1, "Unlimited Lifetime VIP Gift Pass", now),
-                    ("ALPHA-LIFETIME-PASS", "pro", -1, "Unlimited Lifetime Alpha Pass", now),
-                ]
-                cursor.executemany(
-                    "INSERT INTO license_keys (code, tier, max_uses, note, created_at) VALUES (?, ?, ?, ?, ?)",
-                    default_keys,
-                )
-                conn.commit()
-
     def get_or_create_device(
         self, device_id: str, fingerprint: str = "", client_ip: str = ""
     ) -> Dict[str, Any]:

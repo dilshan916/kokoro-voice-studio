@@ -117,6 +117,13 @@ class GrantProRequest(BaseModel):
     note: str = Field(default="API Grant", description="Administrative note")
 
 
+class CreateLicenseKeyRequest(BaseModel):
+    code: str = Field(..., description="Custom promo or license code", min_length=4)
+    tier: str = Field(default="pro", description="Target tier: 'free' or 'pro'")
+    max_uses: int = Field(default=1, description="Maximum allowed redemptions (-1 for unlimited)")
+    note: str = Field(default="Admin Created", description="Administrative note")
+
+
 class ToggleAutoRenewRequest(BaseModel):
     device_id: str = Field(..., description="Target Device ID")
     cancel_at_period_end: bool = Field(True, description="True to turn off auto-renew at period end, False to re-enable")
@@ -971,6 +978,7 @@ async def redeem_license(req: RedeemLicenseRequest):
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
 
 @app.post("/v1/billing/create-checkout-session", summary="Generate Stripe Checkout Link")
@@ -1215,9 +1223,36 @@ async def cancel_subscription(req: CancelSubscriptionRequest):
 async def stripe_webhook(request: Request):
     """
     Handles Stripe webhooks (checkout.session.completed, invoice.payment_succeeded, customer.subscription.deleted).
+    Enforces cryptographic Stripe-Signature header verification to prevent forged events.
     """
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature") or request.headers.get("Stripe-Signature")
+    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET") or STRIPE_WEBHOOK_SECRET
+
+    if not webhook_secret:
+        logger.error("Stripe webhook received but STRIPE_WEBHOOK_SECRET is not configured on server")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe Webhook verification not configured on server",
+        )
+
+    if not sig_header:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing stripe-signature header",
+        )
+
     try:
-        event = await request.json()
+        import stripe
+        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+    except Exception as e:
+        logger.warning(f"Invalid Stripe webhook signature verification: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid webhook signature: {e}",
+        )
+
+    try:
         event_type = event.get("type")
 
         if event_type in ("checkout.session.completed", "invoice.payment_succeeded"):
@@ -1275,6 +1310,29 @@ async def admin_grant_pro(req: GrantProRequest, request: Request):
         "success": True,
         "device_id": req.device_id,
         "quota": res,
+    }
+
+
+@app.post("/admin/create-license-key", summary="Admin API: Generate or Register Promo / License Code")
+async def admin_create_license_key(req: CreateLicenseKeyRequest, request: Request):
+    """
+    Admin endpoint protected by X-Admin-Secret header to create custom VIP or promo license keys.
+    """
+    admin_secret = os.environ.get("ADMIN_SECRET_KEY")
+    client_secret = request.headers.get("X-Admin-Secret") or request.headers.get("x-admin-secret")
+
+    if not admin_secret or client_secret != admin_secret:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Admin Secret Key")
+
+    res = billing_db.create_license_key(
+        code=req.code,
+        tier=req.tier,
+        max_uses=req.max_uses,
+        note=req.note,
+    )
+    return {
+        "success": True,
+        "license_key": res,
     }
 
 
