@@ -1264,10 +1264,10 @@ async def admin_grant_pro(req: GrantProRequest, request: Request):
     """
     Admin endpoint protected by X-Admin-Secret header to grant Pro to any device ID.
     """
-    admin_secret = os.environ.get("ADMIN_SECRET_KEY", "kokoro_secret_admin_2026")
+    admin_secret = os.environ.get("ADMIN_SECRET_KEY")
     client_secret = request.headers.get("X-Admin-Secret") or request.headers.get("x-admin-secret")
 
-    if client_secret != admin_secret:
+    if not admin_secret or client_secret != admin_secret:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Admin Secret Key")
 
     res = billing_db.grant_pro(req.device_id, tier=req.tier, note=req.note)
