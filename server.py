@@ -308,6 +308,42 @@ def split_clause_into_balanced_chunks(
     return chunks
 
 
+def merge_micro_clauses(clauses: List[str], max_chars: int = 34) -> List[str]:
+    """
+    Merge 1-2 word micro-clauses (e.g. 'Yes,', 'Well,', 'In fact,') into adjacent
+    clauses so they don't produce orphaned flickering subtitle cards.
+    """
+    if len(clauses) <= 1:
+        return clauses
+
+    merged: List[str] = []
+    i = 0
+    while i < len(clauses):
+        cur = clauses[i].strip()
+        words = cur.split()
+
+        # If this is a micro-clause (<= 2 words or <= 12 chars), merge forward if it fits
+        if (len(words) <= 2 or len(cur) <= 12) and i < len(clauses) - 1:
+            nxt = clauses[i + 1].strip()
+            if len(cur) + 1 + len(nxt) <= max_chars:
+                merged.append(f"{cur} {nxt}")
+                i += 2
+                continue
+
+        # If it's a trailing micro-clause at the end, merge backwards if it fits
+        if (len(words) <= 2 or len(cur) <= 12) and i == len(clauses) - 1 and merged:
+            prev = merged[-1]
+            if len(prev) + 1 + len(cur) <= max_chars + 6:
+                merged[-1] = f"{prev} {cur}"
+                i += 1
+                continue
+
+        merged.append(cur)
+        i += 1
+
+    return merged
+
+
 def split_text_into_punchy_srt_chunks(
     text: str, max_words: int = 6, max_chars: int = 34
 ) -> List[str]:
@@ -323,13 +359,16 @@ def split_text_into_punchy_srt_chunks(
         return []
 
     cjk_mode = is_cjk_text(clean)
-    clauses = [
+    raw_clauses = [
         c.strip()
         for c in re.split(r"(?<=[.!?,;:—\n。！？，；：])\s*", clean)
         if c.strip()
     ]
-    if not clauses:
-        clauses = [clean]
+    if not raw_clauses:
+        raw_clauses = [clean]
+
+    # Pre-merge micro-clauses before chunking (garse punctuation-first recommendation)
+    clauses = merge_micro_clauses(raw_clauses, max_chars=max_chars)
 
     all_chunks = []
     for cl in clauses:
@@ -359,7 +398,8 @@ def build_srt_subtitles(
     total_duration: float,
     max_words: int = 6,
     max_chars: int = 34,
-    max_chunk_dur: float = 3.0,
+    max_chunk_dur: float = 3.5,
+    min_chunk_dur: float = 1.1,  # 1.1s minimum duration floor (anti-flicker per garse advice)
 ) -> str:
     """Generate perfectly synchronized, vertical-video optimized SubRip (.srt) subtitles."""
     chunks = split_text_into_punchy_srt_chunks(text, max_words, max_chars)
@@ -368,21 +408,32 @@ def build_srt_subtitles(
 
     weights = [calculate_chunk_acoustic_weight(c) for c in chunks]
     total_w = sum(weights)
+
+    # Floor scales down gracefully if total audio is shorter than num_chunks * min_chunk_dur
+    effective_floor = min(min_chunk_dur, total_duration / len(chunks)) if len(chunks) > 0 else min_chunk_dur
+
+    raw_durations = [(w / total_w) * total_duration for w in weights]
+    floored_durations = [max(d, effective_floor) for d in raw_durations]
+
+    # Proportional scaling to match total_duration exactly
+    floored_total = sum(floored_durations)
+    if floored_total > 0:
+        scaled_durations = [(d / floored_total) * total_duration for d in floored_durations]
+    else:
+        scaled_durations = raw_durations
+
     srt_lines = []
     current_time = 0.0
 
-    for idx, (chunk, w) in enumerate(zip(chunks, weights), 1):
-        dur = (w / total_w) * total_duration
-        dur = min(dur, max_chunk_dur)
+    for idx, (chunk, dur) in enumerate(zip(chunks, scaled_durations), 1):
         if idx == len(chunks):
             dur = max(0.2, total_duration - current_time)
 
-        dur = max(dur, 0.6)  # Minimum readable duration for viewer comfort
-
         start_ts = format_srt_timestamp(current_time)
-        end_ts = format_srt_timestamp(min(current_time + dur, total_duration))
+        end_time = min(current_time + dur, total_duration)
+        end_ts = format_srt_timestamp(end_time)
         srt_lines.append(f"{idx}\n{start_ts} --> {end_ts}\n{chunk}\n")
-        current_time = min(current_time + dur, total_duration)
+        current_time = end_time
 
     return "\n".join(srt_lines).strip() + "\n"
 
@@ -496,9 +547,10 @@ def _engine_worker_loop(
                 srt_content = build_srt_subtitles(
                     text=text,
                     total_duration=dur,
-                    max_words=8,
-                    max_chars=40,
+                    max_words=6,
+                    max_chars=34,
                     max_chunk_dur=3.5,
+                    min_chunk_dur=1.1,
                 )
 
                 # Checkpoint 4: Final pre-write check

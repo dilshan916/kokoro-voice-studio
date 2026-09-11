@@ -42,8 +42,14 @@ class SubtitleGenerator:
         lines = []
 
         for idx, seg in enumerate(segments, start=1):
-            start_str = cls.format_timestamp_srt(seg["start_sec"])
-            end_str = cls.format_timestamp_srt(seg["end_sec"])
+            start = float(seg.get("start_sec", 0.0))
+            end = float(seg.get("end_sec", start))
+            # Minimum 1.0s duration floor to eliminate subtitle flicker
+            if end - start < 1.0:
+                end = start + 1.0
+
+            start_str = cls.format_timestamp_srt(start)
+            end_str = cls.format_timestamp_srt(end)
             speaker = seg.get("speaker")
             text = seg.get("text", "").strip()
 
