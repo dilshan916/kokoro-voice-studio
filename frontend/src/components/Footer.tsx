@@ -1,5 +1,5 @@
 import React from 'react';
-import { Github, Smartphone, Heart, Shield, ExternalLink } from 'lucide-react';
+import { Github, Smartphone, Heart, Shield, ExternalLink, Coffee } from 'lucide-react';
 import { LegalDocId, LEGAL_CONFIG } from '../legal/legalConfig';
 
 interface FooterProps {
@@ -44,7 +44,7 @@ export const Footer: React.FC<FooterProps> = React.memo(({
             Ultra-fast CPU inference, 60 international neural voices, studio mastering EQ, and synchronized subtitle export.
           </p>
 
-          <div className="flex items-center gap-3 pt-1">
+          <div className="flex flex-wrap items-center gap-3 pt-1">
             <a
               href="https://github.com/dilshan916/kokoro-mobile/releases/download/v1.0.0/kokoro-voice-studio-v1.0.0-universal.apk"
               target="_blank"
@@ -53,6 +53,15 @@ export const Footer: React.FC<FooterProps> = React.memo(({
             >
               <Smartphone className="w-3.5 h-3.5 text-indigo-500" />
               <span>Download Mobile APK</span>
+            </a>
+            <a
+              href="https://buymeacoffee.com/alphacreations"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 transition-colors text-xs font-semibold"
+            >
+              <Coffee className="w-3.5 h-3.5 text-amber-500" />
+              <span>Buy Me a Coffee</span>
             </a>
             <a
               href={LEGAL_CONFIG.githubUrl}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sun, Moon, Server, Smartphone, Terminal, Menu } from 'lucide-react';
+import { Sun, Moon, Server, Smartphone, Terminal, Menu, Coffee } from 'lucide-react';
 import { HealthData, UserQuota } from '../types';
 
 interface NavbarProps {
@@ -192,6 +192,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   <Smartphone className="w-3.5 h-3.5 text-indigo-500" />
                   <span>Download Mobile APK</span>
+                </a>
+
+                {/* Buy Me a Coffee */}
+                <a
+                  href="https://buymeacoffee.com/alphacreations"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setIsUserMenuOpen(false)}
+                  className="w-full p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700/60 text-left flex items-center justify-between text-slate-700 dark:text-slate-200 transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <Coffee className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Buy Me a Coffee</span>
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                    Support
+                  </span>
                 </a>
               </div>
             )}
