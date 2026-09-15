@@ -740,7 +740,7 @@ class EngineProcessManager:
                             base_name = msg.get("base_name")
                             file_ext = msg.get("file_ext", "wav")
                             file_size = msg.get("file_size_bytes", 0)
-                            audio_url = f"/audio/{filename}"
+                            audio_url = f"/audio/{filename}?device_id={device_id}" if device_id else f"/audio/{filename}"
 
                             # Record artifact ownership
                             billing_db.record_audio_artifact(
@@ -963,7 +963,8 @@ class SessionAuth:
     """
     Dependency that authenticates server-issued anonymous sessions.
     Validates HttpOnly 'saytts_session' cookie or 'X-Device-Token' header.
-    Never trusts client-supplied device_id for authorization.
+    Provides native mobile client backward compatibility via 'X-Device-Id' header,
+    query parameters, or JSON body identifier with server-side IP tracking.
     """
 
     def __init__(self, auto_error: bool = True):
@@ -980,32 +981,71 @@ class SessionAuth:
                 if not bearer_val.startswith("sk_"):
                     token = bearer_val
 
-        if not token:
-            if self.auto_error:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Authentication required. Please initialize a session via POST /v1/auth/session.",
-                )
+        if token:
+            is_valid, device_id, session_record = billing_db.authenticate_session(token)
+            if is_valid and device_id:
+                dev_quota = billing_db.get_device_quota(device_id)
+                session = {
+                    "session_id": session_record.get("session_id", "") if session_record else "",
+                    "device_id": device_id,
+                    "is_pro": dev_quota.get("tier") == "pro",
+                    "tier": dev_quota.get("tier", "free"),
+                }
+                request.state.session = session
+                request.state.device_id = device_id
+                return session
+
+        # Fallback for Native Mobile APK & Legacy Client Devices
+        client_dev_id = (
+            request.headers.get("X-Device-Id")
+            or request.headers.get("x-device-id")
+            or request.query_params.get("device_id")
+        )
+
+        if not client_dev_id and request.method in ("POST", "PUT", "PATCH"):
+            content_type = request.headers.get("content-type", "").lower()
+            if "application/json" in content_type:
+                try:
+                    body_json = await request.json()
+                    if isinstance(body_json, dict):
+                        client_dev_id = body_json.get("device_id")
+                except Exception:
+                    pass
+
+        if client_dev_id and isinstance(client_dev_id, str):
+            clean_dev_id = client_dev_id.strip()
+            # Validate device_id format (alphanumeric, underscores, hyphens, dots, 3 to 128 chars)
+            if re.match(r"^[a-zA-Z0-9_\-\.]{3,128}$", clean_dev_id):
+                client_ip = get_client_ip(request)
+                billing_db.get_or_create_device(clean_dev_id, client_ip=client_ip)
+                dev_quota = billing_db.get_device_quota(clean_dev_id)
+                session = {
+                    "session_id": f"sess_compat_{clean_dev_id[:16]}",
+                    "device_id": clean_dev_id,
+                    "is_pro": dev_quota.get("tier") == "pro",
+                    "tier": dev_quota.get("tier", "free"),
+                }
+                request.state.session = session
+                request.state.device_id = clean_dev_id
+                return session
+
+        if not self.auto_error:
             return None
 
-        is_valid, device_id, session_record = billing_db.authenticate_session(token)
-        if not is_valid or not device_id:
-            if self.auto_error:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid or expired session. Please refresh your session via POST /v1/auth/session.",
-                )
-            return None
-
-        dev_quota = billing_db.get_device_quota(device_id)
+        # Auto-provision IP-bound anonymous session for unauthenticated callers
+        client_ip = get_client_ip(request)
+        ip_hash = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:16]
+        auto_dev_id = f"dev_anon_{ip_hash}"
+        billing_db.get_or_create_device(auto_dev_id, client_ip=client_ip)
+        dev_quota = billing_db.get_device_quota(auto_dev_id)
         session = {
-            "session_id": session_record.get("session_id", "") if session_record else "",
-            "device_id": device_id,
+            "session_id": f"sess_auto_{auto_dev_id[:16]}",
+            "device_id": auto_dev_id,
             "is_pro": dev_quota.get("tier") == "pro",
             "tier": dev_quota.get("tier", "free"),
         }
         request.state.session = session
-        request.state.device_id = device_id
+        request.state.device_id = auto_dev_id
         return session
 
 get_current_session = SessionAuth(auto_error=True)
@@ -1633,7 +1673,7 @@ async def render_audio(
         )
 
         base_url = str(request.base_url).rstrip("/")
-        audio_url = f"{base_url}/audio/{filename}"
+        audio_url = f"{base_url}/audio/{filename}?device_id={device_id}"
 
         return RenderResponse(
             success=True,

@@ -1121,7 +1121,7 @@ class BillingDB:
 
             return "OK", data
 
-    def cleanup_expired_artifacts(self, output_dir: Path) -> int:
+    def cleanup_expired_artifacts(self, output_dir: Path, max_age_seconds: int = 7200) -> int:
         """
         Application-aware cleanup task: Prunes expired audio artifacts and unlinks files.
         Ignores files modified in the last 15 minutes to avoid race conditions with active downloads.
