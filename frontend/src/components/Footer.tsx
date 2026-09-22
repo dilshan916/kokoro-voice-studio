@@ -1,5 +1,5 @@
 import React from 'react';
-import { Github, Smartphone, Heart, Shield, ExternalLink, Coffee } from 'lucide-react';
+import { Github, Smartphone, Heart, Shield, ExternalLink, Coffee, BookOpen, Mic } from 'lucide-react';
 import { LegalDocId, LEGAL_CONFIG } from '../legal/legalConfig';
 
 interface FooterProps {
@@ -7,6 +7,7 @@ interface FooterProps {
   onOpenPricing: () => void;
   onOpenDevelopers: () => void;
   onOpenLegal: (docId: LegalDocId) => void;
+  onNavigate?: (route: string) => void;
 }
 
 export const Footer: React.FC<FooterProps> = React.memo(({
@@ -14,13 +15,35 @@ export const Footer: React.FC<FooterProps> = React.memo(({
   onOpenPricing,
   onOpenDevelopers,
   onOpenLegal,
+  onNavigate,
 }) => {
+  const handleLegalClick = (e: React.MouseEvent, docId: LegalDocId) => {
+    e.preventDefault();
+    onOpenLegal(docId);
+    window.history.pushState({}, '', `/legal/${docId}`);
+  };
+
+  const handleNavClick = (e: React.MouseEvent, route: string) => {
+    if (onNavigate) {
+      e.preventDefault();
+      onNavigate(route);
+      window.history.pushState({}, '', `/${route === 'home' ? '' : route}`);
+    } else if (route === 'voices') {
+      e.preventDefault();
+      onOpenVoices();
+    }
+  };
+
   return (
     <footer className="w-full bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl border-t border-slate-200/80 dark:border-slate-800 py-12 px-4 select-none mt-12 text-xs text-slate-500 dark:text-slate-400">
       <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-12 gap-8 lg:gap-12 pb-10 border-b border-slate-100 dark:border-slate-800/80">
         {/* Brand & Bio (Col 1-5) */}
         <div className="md:col-span-5 flex flex-col items-start gap-3">
-          <div className="flex items-center gap-2">
+          <a
+            href="/"
+            onClick={(e) => handleNavClick(e, 'home')}
+            className="flex items-center gap-2"
+          >
             <div className="w-8 h-8 rounded-full overflow-hidden shadow-xs flex items-center justify-center bg-blue-600">
               <img
                 src="/logo-96.webp"
@@ -37,7 +60,7 @@ export const Footer: React.FC<FooterProps> = React.memo(({
             <span className="font-extrabold text-base text-slate-900 dark:text-white">
               Kokoro<span className="text-blue-600">Studio</span>
             </span>
-          </div>
+          </a>
 
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm leading-relaxed">
             High-performance AI text-to-speech studio powered by open-weights Kokoro-82M ONNX.
@@ -78,21 +101,37 @@ export const Footer: React.FC<FooterProps> = React.memo(({
         {/* Product Column (Col 6-7) */}
         <div className="md:col-span-2 flex flex-col gap-2.5">
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-900 dark:text-white">
-            Product
+            Product &amp; Guides
           </span>
           <ul className="space-y-2 text-xs font-medium text-slate-600 dark:text-slate-400">
             <li>
-              <a href="#home" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+              <a
+                href="/"
+                onClick={(e) => handleNavClick(e, 'home')}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              >
                 Text to Speech
               </a>
             </li>
             <li>
-              <button
-                onClick={onOpenVoices}
-                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
+              <a
+                href="/voices"
+                onClick={(e) => handleNavClick(e, 'voices')}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors inline-flex items-center gap-1"
               >
-                60 AI Voices
-              </button>
+                <Mic className="w-3 h-3 text-indigo-500" />
+                <span>60 AI Voices</span>
+              </a>
+            </li>
+            <li>
+              <a
+                href="/guide"
+                onClick={(e) => handleNavClick(e, 'guide')}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors inline-flex items-center gap-1"
+              >
+                <BookOpen className="w-3 h-3 text-blue-500" />
+                <span>Mastering Guide</span>
+              </a>
             </li>
             <li>
               <button
@@ -121,60 +160,67 @@ export const Footer: React.FC<FooterProps> = React.memo(({
           </span>
           <ul className="space-y-2 text-xs font-medium text-slate-600 dark:text-slate-400">
             <li>
-              <button
-                onClick={() => onOpenLegal('privacy')}
-                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
+              <a
+                href="/legal/privacy"
+                onClick={(e) => handleLegalClick(e, 'privacy')}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 Privacy Policy
-              </button>
+              </a>
             </li>
             <li>
-              <button
-                onClick={() => onOpenLegal('terms')}
-                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
+              <a
+                href="/legal/terms"
+                onClick={(e) => handleLegalClick(e, 'terms')}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 Terms of Service
-              </button>
+              </a>
             </li>
             <li>
-              <button
-                onClick={() => onOpenLegal('acceptable-use')}
-                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
+              <a
+                href="/legal/acceptable-use"
+                onClick={(e) => handleLegalClick(e, 'acceptable-use')}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 Acceptable Use Policy
-              </button>
+              </a>
             </li>
             <li>
-              <button
-                onClick={() => onOpenLegal('ai-policy')}
-                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
+              <a
+                href="/legal/ai-policy"
+                onClick={(e) => handleLegalClick(e, 'ai-policy')}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 AI &amp; Voice Ethics Policy
-              </button>
+              </a>
             </li>
             <li>
-              <button
-                onClick={() => onOpenLegal('cookies')}
-                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
+              <a
+                href="/legal/cookies"
+                onClick={(e) => handleLegalClick(e, 'cookies')}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 Cookie &amp; Storage Policy
-              </button>
+              </a>
             </li>
             <li>
-              <button
-                onClick={() => onOpenLegal('dmca')}
-                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
+              <a
+                href="/legal/dmca"
+                onClick={(e) => handleLegalClick(e, 'dmca')}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 Copyright / DMCA
-              </button>
+              </a>
             </li>
             <li>
-              <button
-                onClick={() => onOpenLegal('refunds')}
-                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
+              <a
+                href="/legal/refunds"
+                onClick={(e) => handleLegalClick(e, 'refunds')}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 Refund &amp; Cancellation
-              </button>
+              </a>
             </li>
           </ul>
         </div>
@@ -186,20 +232,22 @@ export const Footer: React.FC<FooterProps> = React.memo(({
           </span>
           <ul className="space-y-2 text-xs font-medium text-slate-600 dark:text-slate-400">
             <li>
-              <button
-                onClick={() => onOpenLegal('about')}
-                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
+              <a
+                href="/about"
+                onClick={(e) => handleNavClick(e, 'about')}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 About Us
-              </button>
+              </a>
             </li>
             <li>
-              <button
-                onClick={() => onOpenLegal('contact')}
-                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer text-left"
+              <a
+                href="/contact"
+                onClick={(e) => handleNavClick(e, 'contact')}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
-                Contact Us
-              </button>
+                Contact &amp; Support
+              </a>
             </li>
             <li>
               <a

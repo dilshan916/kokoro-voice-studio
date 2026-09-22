@@ -1082,6 +1082,10 @@ async def root_spa():
 
 @app.api_route("/legal", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/legal/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/about", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/contact", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/guide", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/voices", methods=["GET", "HEAD"], include_in_schema=False)
 async def legal_spa(path: str = ""):
     index_file = FRONTEND_DIST / "index.html"
     if index_file.exists():

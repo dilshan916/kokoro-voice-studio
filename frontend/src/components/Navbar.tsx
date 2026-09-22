@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sun, Moon, Server, Smartphone, Terminal, Menu, Coffee } from 'lucide-react';
+import { Sun, Moon, Server, Smartphone, Terminal, Menu, Coffee, BookOpen, Mic, Info, Mail } from 'lucide-react';
 import { HealthData, UserQuota } from '../types';
 
 interface NavbarProps {
@@ -8,6 +8,7 @@ interface NavbarProps {
   onOpenVoices: () => void;
   onOpenPricing: () => void;
   onOpenDevelopers: () => void;
+  onNavigate?: (route: string) => void;
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
 }
@@ -18,6 +19,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenVoices,
   onOpenPricing,
   onOpenDevelopers,
+  onNavigate,
   isDarkMode,
   onToggleDarkMode,
 }) => {
@@ -26,6 +28,17 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const isOnline = health?.status === 'ready';
   const isPro = quota?.tier === 'pro';
+
+  const handleNavClick = (e: React.MouseEvent, route: string) => {
+    if (onNavigate) {
+      e.preventDefault();
+      onNavigate(route);
+      window.history.pushState({}, '', `/${route === 'home' ? '' : route}`);
+    } else if (route === 'voices') {
+      e.preventDefault();
+      onOpenVoices();
+    }
+  };
 
   // Close menu on outside click
   useEffect(() => {
@@ -42,29 +55,44 @@ export const Navbar: React.FC<NavbarProps> = ({
     <header className="sticky top-0 z-40 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-blue-100/60 dark:border-slate-800 select-none">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         {/* Left: Brand Logo & Title */}
-        <div className="flex items-center gap-2.5">
+        <a
+          href="/"
+          onClick={(e) => handleNavClick(e, 'home')}
+          className="flex items-center gap-2.5 cursor-pointer"
+        >
           <div className="w-9 h-9 rounded-full overflow-hidden shadow-md shadow-blue-500/20 flex items-center justify-center">
             <img src="/logo-96.webp" alt="Kokoro Voice Studio App Icon" width="36" height="36" className="w-full h-full object-cover" />
           </div>
           <span className="font-extrabold text-lg tracking-tight text-slate-900 dark:text-white font-sans">
             Kokoro<span className="text-blue-600 font-bold ml-0.5">Voice Studio</span>
           </span>
-        </div>
+        </a>
 
-        {/* Center: Clean Nav Links (Home, Voices, Pricing - NO API/Docs) */}
-        <nav className="hidden sm:flex items-center gap-8 text-sm font-medium text-slate-600 dark:text-slate-300">
+        {/* Center: Crawlable Nav Links */}
+        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-300">
           <a
-            href="#home"
-            className="text-slate-900 dark:text-white font-semibold hover:text-blue-600 transition-colors"
+            href="/"
+            onClick={(e) => handleNavClick(e, 'home')}
+            className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
           >
-            Home
+            Studio
           </a>
-          <button
-            onClick={onOpenVoices}
-            className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
+          <a
+            href="/guide"
+            onClick={(e) => handleNavClick(e, 'guide')}
+            className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center gap-1.5"
           >
-            Voices
-          </button>
+            <BookOpen className="w-3.5 h-3.5 text-blue-500" />
+            <span>Guide</span>
+          </a>
+          <a
+            href="/voices"
+            onClick={(e) => handleNavClick(e, 'voices')}
+            className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center gap-1.5"
+          >
+            <Mic className="w-3.5 h-3.5 text-indigo-500" />
+            <span>Voices</span>
+          </a>
           <button
             onClick={onOpenPricing}
             className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -76,26 +104,23 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             )}
           </button>
-          <button
-            onClick={onOpenDevelopers}
-            className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center gap-1.5 cursor-pointer"
-          >
-            <Terminal className="w-3.5 h-3.5 text-blue-500" />
-            <span>API</span>
-          </button>
           <a
-            href="https://github.com/dilshan916/kokoro-mobile/releases/download/v1.0.0/kokoro-voice-studio-v1.0.0-universal.apk"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors flex items-center gap-1.5"
-            title="Download Android Mobile APK"
+            href="/about"
+            onClick={(e) => handleNavClick(e, 'about')}
+            className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
           >
-            <Smartphone className="w-3.5 h-3.5 text-indigo-500" />
-            <span>Mobile App</span>
+            About
+          </a>
+          <a
+            href="/contact"
+            onClick={(e) => handleNavClick(e, 'contact')}
+            className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+          >
+            Contact
           </a>
         </nav>
 
-        {/* Right: Theme Toggle & User Avatar Dropdown */}
+        {/* Right: Theme Toggle & Dropdown Menu */}
         <div className="flex items-center gap-3">
           {/* Light / Dark Mode Toggle */}
           <button
@@ -146,6 +171,42 @@ export const Navbar: React.FC<NavbarProps> = ({
                       ? 'Enjoy unlimited speech generations'
                       : `${(quota?.monthly_usage || 0).toLocaleString()} / ${(quota?.monthly_limit || 30000).toLocaleString()} characters used`}
                   </div>
+                </div>
+
+                {/* Mobile Links for Small Screens */}
+                <div className="md:hidden border-t border-slate-100 dark:border-slate-700/60 pt-2 space-y-1">
+                  <a
+                    href="/guide"
+                    onClick={(e) => { setIsUserMenuOpen(false); handleNavClick(e, 'guide'); }}
+                    className="w-full p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-2 text-slate-700 dark:text-slate-200"
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Guide &amp; Documentation</span>
+                  </a>
+                  <a
+                    href="/voices"
+                    onClick={(e) => { setIsUserMenuOpen(false); handleNavClick(e, 'voices'); }}
+                    className="w-full p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-2 text-slate-700 dark:text-slate-200"
+                  >
+                    <Mic className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>60 AI Voices Directory</span>
+                  </a>
+                  <a
+                    href="/about"
+                    onClick={(e) => { setIsUserMenuOpen(false); handleNavClick(e, 'about'); }}
+                    className="w-full p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-2 text-slate-700 dark:text-slate-200"
+                  >
+                    <Info className="w-3.5 h-3.5 text-blue-500" />
+                    <span>About Us</span>
+                  </a>
+                  <a
+                    href="/contact"
+                    onClick={(e) => { setIsUserMenuOpen(false); handleNavClick(e, 'contact'); }}
+                    className="w-full p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-2 text-slate-700 dark:text-slate-200"
+                  >
+                    <Mail className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Contact Support</span>
+                  </a>
                 </div>
 
                 {/* Developer API & Keys */}

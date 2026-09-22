@@ -107,7 +107,8 @@ export const ALL_LEGAL_DOCS: LegalDocument[] = [
           `HTML5 LocalStorage: We do not use first-party tracking cookies. Instead, we use HTML5 localStorage exclusively for essential functional state: "kokoro_theme" (light/dark preference), "kokoro_device_id" (anonymous quota tracking), "kokoro_history" (your recent audio clips on your device), and "kokoro_api_url" (optional backend server override).`,
           `Infrastructure Security: Our network traffic is protected with edge routing, DDoS mitigation, and SSL termination. Essential security cookies (such as bot-detection cookies) may be used solely to protect the service against malicious traffic.`,
           `No Third-Party Telemetry: We do not employ third-party session recording tools, invasive analytics trackers, or commercial user fingerprinting scripts.`,
-          `Advertising: Third-party advertising is NOT currently active on this deployment. If advertising is activated in the future, this policy and our Cookie Policy will be updated accordingly.`,
+          `Google AdSense & Third-Party Advertising: We partner with Google AdSense to serve advertisements when you visit our website. Google and its third-party advertising partners use cookies (including the DoubleClick / DART cookie) to serve ads based on your prior visits to this website or other sites on the internet.`,
+          `Opting Out of Personalized Ads: You may opt out of personalized advertising by visiting Google Ads Settings at https://www.google.com/settings/ads. Alternatively, you can opt out of third-party vendor cookies for personalized advertising by visiting http://www.aboutads.info/choices/ or Your Online Choices at https://www.youronlinechoices.com/.`,
         ],
       },
       {
@@ -506,13 +507,15 @@ export const ALL_LEGAL_DOCS: LegalDocument[] = [
       },
       {
         id: 'advertising-adsense',
-        title: '5. Third-Party Advertising & AdSense Status',
+        title: '5. Google AdSense & Third-Party Advertising Cookies',
         content: [
-          `Current Advertising Status: Inactive. The application does not currently deliver third-party advertisements, and no advertising cookies are actively placed on your device by our platform.`,
-          `Google AdSense Verification Placeholder: A commented-out script placeholder exists in our source markup to support future account verification. If and when third-party advertising is officially enabled:`,
-          `• Google and its partner networks may use third-party cookies (including the DoubleClick / DART cookie) to serve ads based on your prior visits to our site or other websites.`,
-          `• You may opt out of personalized advertising by visiting Google Ad Settings (https://www.google.com/settings/ads) or aboutads.info.`,
-          `• This policy will be updated with an explicit disclosure and consent banner prior to any activation of live advertising.`,
+          `Google AdSense Integration: ${LEGAL_CONFIG.serviceName} uses Google AdSense and third-party advertising networks to serve advertisements across our website to keep our neural text-to-speech services free for creators worldwide.`,
+          `How Advertising Cookies Work: Third-party vendors, including Google, use cookies to serve ads based on a user's prior visits to our website or other websites. Google's use of advertising cookies enables it and its partners to serve ads to our users based on their visit to our sites and/or other sites on the Internet.`,
+          `DoubleClick / DART Cookie: The DoubleClick DART cookie is used by Google in the ads served on publisher websites displaying AdSense for content ads. When users visit our website and view or click an ad, a cookie may be placed in their browser cache.`,
+          `User Privacy & Opt-Out Controls: You have full control over personalized advertising preferences:`,
+          `• Opt-Out via Google: You may opt out of personalized advertising by visiting Google Ads Settings (https://www.google.com/settings/ads).`,
+          `• Opt-Out via Industry Portals: You can opt out of third-party vendor cookies for personalized advertising by visiting the Digital Advertising Alliance at http://www.aboutads.info/choices/ or Your Online Choices (EU/UK) at https://www.youronlinechoices.com/.`,
+          `• Browser-Level Cookie Blocking: You can configure your browser to reject all third-party cookies. Disabling cookies will not restrict or disable your ability to synthesize speech on Kokoro Voice Studio.`,
         ],
       },
       {

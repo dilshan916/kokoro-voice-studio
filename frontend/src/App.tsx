@@ -12,12 +12,16 @@ import { LegalDocId, isLegalDocId } from './legal/legalConfig';
 import { kokoroApi } from './api/kokoroApi';
 import { Voice, HealthData, UserQuota, GenerationHistoryItem } from './types';
 
-// Lazy-loaded dialogs & Legal Center (keeps ~150KB out of initial homepage bundle)
+// Lazy-loaded dialogs, pages & Legal Center (keeps bundle lean)
 const VoiceModal = React.lazy(() => import('./components/VoiceModal').then((m) => ({ default: m.VoiceModal })));
 const PricingModal = React.lazy(() => import('./components/PricingModal').then((m) => ({ default: m.PricingModal })));
 const DeveloperModal = React.lazy(() => import('./components/DeveloperModal').then((m) => ({ default: m.DeveloperModal })));
 const LegalModal = React.lazy(() => import('./components/LegalModal').then((m) => ({ default: m.LegalModal })));
 const LegalCenter = React.lazy(() => import('./components/LegalCenter').then((m) => ({ default: m.LegalCenter })));
+const AboutPage = React.lazy(() => import('./components/AboutPage').then((m) => ({ default: m.AboutPage })));
+const ContactPage = React.lazy(() => import('./components/ContactPage').then((m) => ({ default: m.ContactPage })));
+const GuidePage = React.lazy(() => import('./components/GuidePage').then((m) => ({ default: m.GuidePage })));
+const VoicesPage = React.lazy(() => import('./components/VoicesPage').then((m) => ({ default: m.VoicesPage })));
 
 const DEFAULT_INITIAL_VOICES: Voice[] = [
   { id: 'af_bella', name: 'Bella', gender: 'Female', lang: 'en-us', lang_name: 'English (US)', flag: '🇺🇸', description: 'Warm, expressive, high-retention narration' },
@@ -32,31 +36,38 @@ const DEFAULT_INITIAL_VOICES: Voice[] = [
   { id: 'pf_dora', name: 'Dora (BR)', gender: 'Female', lang: 'pt-br', lang_name: 'Portuguese (BR)', flag: '🇧🇷', description: 'Natural Brazilian Portuguese voice' },
 ];
 
-function parseLegalRoute(): { isLegal: boolean; docId: LegalDocId } {
-  if (typeof window === 'undefined') return { isLegal: false, docId: 'privacy' };
+type AppView = 'studio' | 'legal' | 'about' | 'contact' | 'guide' | 'voices';
+
+function parseAppRoute(): { view: AppView; docId: LegalDocId } {
+  if (typeof window === 'undefined') return { view: 'studio', docId: 'privacy' };
 
   const pathname = window.location.pathname.toLowerCase();
   const hash = window.location.hash.toLowerCase();
 
+  if (pathname.startsWith('/about') || hash === '#about') return { view: 'about', docId: 'privacy' };
+  if (pathname.startsWith('/contact') || hash === '#contact') return { view: 'contact', docId: 'privacy' };
+  if (pathname.startsWith('/guide') || hash === '#guide') return { view: 'guide', docId: 'privacy' };
+  if (pathname.startsWith('/voices') || hash === '#voices') return { view: 'voices', docId: 'privacy' };
+
   // Match /legal, /legal/privacy, /legal/terms, etc.
   if (pathname.startsWith('/legal')) {
     const sub = pathname.replace(/^\/legal\/?/, '').split('/')[0];
-    return { isLegal: true, docId: isLegalDocId(sub) ? sub : 'privacy' };
+    return { view: 'legal', docId: isLegalDocId(sub) ? sub : 'privacy' };
   }
 
   // Match #/legal/..., #legal/...
   if (hash.startsWith('#/legal') || hash.startsWith('#legal')) {
     const sub = hash.replace(/^#\/?legal\/?/, '').split('/')[0];
-    return { isLegal: true, docId: isLegalDocId(sub) ? sub : 'privacy' };
+    return { view: 'legal', docId: isLegalDocId(sub) ? sub : 'privacy' };
   }
 
   // Match direct hash: #privacy, #terms, etc.
   const directHash = hash.replace(/^#\/?/, '');
   if (isLegalDocId(directHash)) {
-    return { isLegal: true, docId: directHash };
+    return { view: 'legal', docId: directHash };
   }
 
-  return { isLegal: false, docId: 'privacy' };
+  return { view: 'studio', docId: 'privacy' };
 }
 
 export const App: React.FC = () => {
@@ -108,29 +119,43 @@ export const App: React.FC = () => {
   const [isDeveloperModalOpen, setIsDeveloperModalOpen] = useState(false);
   const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
 
-  // View Routing State (Studio vs Dedicated Legal Center)
-  const [currentView, setCurrentView] = useState<'studio' | 'legal'>(() => {
-    return parseLegalRoute().isLegal ? 'legal' : 'studio';
+  // View Routing State (Studio, Legal, About, Contact, Guide, Voices)
+  const [currentView, setCurrentView] = useState<AppView>(() => {
+    return parseAppRoute().view;
   });
   const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocId>(() => {
-    return parseLegalRoute().docId;
+    return parseAppRoute().docId;
   });
 
   // Handle browser back/forward (popstate)
   useEffect(() => {
     const handlePopState = () => {
-      const route = parseLegalRoute();
-      if (route.isLegal) {
-        setCurrentView('legal');
-        setActiveLegalDoc(route.docId);
-      } else {
-        setCurrentView('studio');
-      }
+      const route = parseAppRoute();
+      setCurrentView(route.view);
+      setActiveLegalDoc(route.docId);
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  const navigateTo = (route: string) => {
+    if (route === 'home' || route === 'studio') {
+      setCurrentView('studio');
+      if (typeof window !== 'undefined') {
+        window.history.pushState(null, '', '/');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    } else if (route === 'about' || route === 'contact' || route === 'guide' || route === 'voices') {
+      setCurrentView(route as AppView);
+      if (typeof window !== 'undefined') {
+        window.history.pushState(null, '', `/${route}`);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    } else if (isLegalDocId(route)) {
+      navigateToLegal(route);
+    }
+  };
 
   const navigateToLegal = (docId: LegalDocId) => {
     setActiveLegalDoc(docId);
@@ -388,6 +413,47 @@ export const App: React.FC = () => {
     );
   }
 
+  if (currentView === 'about') {
+    return (
+      <React.Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+        <AboutPage onBackToStudio={navigateToStudio} onNavigate={navigateTo} />
+      </React.Suspense>
+    );
+  }
+
+  if (currentView === 'contact') {
+    return (
+      <React.Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+        <ContactPage onBackToStudio={navigateToStudio} onNavigate={navigateTo} />
+      </React.Suspense>
+    );
+  }
+
+  if (currentView === 'guide') {
+    return (
+      <React.Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+        <GuidePage onBackToStudio={navigateToStudio} onNavigate={navigateTo} />
+      </React.Suspense>
+    );
+  }
+
+  if (currentView === 'voices') {
+    return (
+      <React.Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+        <VoicesPage
+          voices={voices}
+          selectedVoiceId={selectedVoice.id}
+          onSelectVoice={(v) => {
+            setSelectedVoice(v);
+            navigateToStudio();
+          }}
+          onBackToStudio={navigateToStudio}
+          onNavigate={navigateTo}
+        />
+      </React.Suspense>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-[#eaf3ff] via-[#e2edfc] to-[#d8e7fa] dark:from-[#0b0f19] dark:via-[#0e1322] dark:to-[#090d16] text-slate-900 dark:text-slate-100 font-sans transition-colors duration-200">
       {/* 1. Clean Top Navbar */}
@@ -397,6 +463,7 @@ export const App: React.FC = () => {
         onOpenVoices={() => setIsVoiceModalOpen(true)}
         onOpenPricing={() => setIsPricingModalOpen(true)}
         onOpenDevelopers={() => setIsDeveloperModalOpen(true)}
+        onNavigate={navigateTo}
         isDarkMode={isDarkMode}
         onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
       />
@@ -480,6 +547,7 @@ export const App: React.FC = () => {
         onOpenPricing={() => setIsPricingModalOpen(true)}
         onOpenDevelopers={() => setIsDeveloperModalOpen(true)}
         onOpenLegal={(docId) => navigateToLegal(docId)}
+        onNavigate={navigateTo}
       />
 
       {/* 3. Floating "LAST REGENERATIONS" Widget on Bottom-Right */}
