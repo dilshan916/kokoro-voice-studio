@@ -9,6 +9,7 @@ import { SeoFeatures } from './components/SeoFeatures';
 import { SeoFaq } from './components/SeoFaq';
 import { Footer } from './components/Footer';
 import { AdsterraBanner } from './components/AdsterraBanner';
+import { AdsterraLeaderboard } from './components/AdsterraLeaderboard';
 import { LegalDocId, isLegalDocId } from './legal/legalConfig';
 import { kokoroApi } from './api/kokoroApi';
 import { Voice, HealthData, UserQuota, GenerationHistoryItem } from './types';
@@ -543,6 +544,9 @@ export const App: React.FC = () => {
 
         {/* 4. Interactive SEO FAQ Accordion */}
         <SeoFaq />
+
+        {/* Adsterra 728x90 Leaderboard Banner */}
+        <AdsterraLeaderboard />
       </main>
 
       {/* 5. Semantic SEO Footer */}
