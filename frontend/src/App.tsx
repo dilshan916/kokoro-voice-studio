@@ -10,6 +10,7 @@ import { SeoFaq } from './components/SeoFaq';
 import { Footer } from './components/Footer';
 import { AdsterraBanner } from './components/AdsterraBanner';
 import { AdsterraLeaderboard } from './components/AdsterraLeaderboard';
+import { AdsterraMobileBanner } from './components/AdsterraMobileBanner';
 import { LegalDocId, isLegalDocId } from './legal/legalConfig';
 import { kokoroApi } from './api/kokoroApi';
 import { Voice, HealthData, UserQuota, GenerationHistoryItem } from './types';
@@ -535,6 +536,9 @@ export const App: React.FC = () => {
 
         {/* Trust Badges */}
         <TrustBadges />
+
+        {/* Adsterra 320x50 Mobile Banner */}
+        <AdsterraMobileBanner />
 
         {/* Adsterra Native Banner */}
         <AdsterraBanner />
