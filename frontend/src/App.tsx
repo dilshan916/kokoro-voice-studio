@@ -8,6 +8,7 @@ import { LastRegenerations } from './components/LastRegenerations';
 import { SeoFeatures } from './components/SeoFeatures';
 import { SeoFaq } from './components/SeoFaq';
 import { Footer } from './components/Footer';
+import { AdsterraBanner } from './components/AdsterraBanner';
 import { LegalDocId, isLegalDocId } from './legal/legalConfig';
 import { kokoroApi } from './api/kokoroApi';
 import { Voice, HealthData, UserQuota, GenerationHistoryItem } from './types';
@@ -533,6 +534,9 @@ export const App: React.FC = () => {
 
         {/* Trust Badges */}
         <TrustBadges />
+
+        {/* Adsterra Native Banner */}
+        <AdsterraBanner />
 
         {/* 3. Crawlable SEO Features Grid */}
         <SeoFeatures />
